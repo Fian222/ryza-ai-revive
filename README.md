@@ -55,6 +55,8 @@ python scripts/restore_media.py path\to\RyzaChat-1.2.22.apk
 python scripts/restore_media.py path\to\win-unpacked\resources\web
 ```
 
+On Linux, use `python3 scripts/restore_media.py /path/to/RyzaChat-1.2.15.apk`.
+
 If asset files change, regenerate indexes with `python scripts/build_indexes.py`.
 
 ---
@@ -67,13 +69,26 @@ Copy `config/providers.example.json` to `config/providers.json` for local hydrat
 
 ## Build
 
+Browser, desktop development, and Windows packaging:
+
 ```powershell
-python scripts/serve.py                          # browser
-cd desktop; npm install; npx electron .          # desktop
-powershell -File scripts/build_desktop.ps1       # NSIS installer
+python scripts/serve.py
+cd desktop; npm install; npx electron .
+powershell -File scripts/build_desktop.ps1
 powershell -File scripts/setup_android_tools.ps1 # JDK 17 + SDK (once)
-powershell -File scripts/build_apk.ps1           # APK
+powershell -File scripts/build_apk.ps1            # output\android\RyzaChat-<version>.apk
 ```
+
+Android on Linux (x86_64): install `curl` or `wget`, `tar`, and `unzip`, restore
+the runtime media as described above, then run:
+
+```bash
+./scripts/setup_android_tools.sh # project-local JDK 17 + Android SDK 34 (once)
+./scripts/build_apk.sh           # output/android/RyzaChat-<version>.apk
+```
+
+The Linux setup does not require Android Studio or root access. Both Android
+workflows use API 34 and Build Tools 34.0.0.
 
 Android toolchain path: environment `RYZA_ANDROID_TOOLS`, or gitignored `config/android-tools.local.txt`.
 

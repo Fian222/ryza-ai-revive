@@ -8,10 +8,23 @@ chat). `config/*` is served as 404 so provider files are not loaded from the APK
 
 ## Build the APK (no Gradle needed)
 
+Windows:
+
 ```powershell
 powershell -File scripts/setup_android_tools.ps1   # one-time: JDK17 + SDK 34
 powershell -File scripts/build_apk.ps1             # -> output\android\RyzaChat-<ver>.apk
 ```
+
+Linux (x86_64):
+
+```bash
+./scripts/setup_android_tools.sh                   # one-time: JDK17 + SDK 34
+./scripts/build_apk.sh                             # -> output/android/RyzaChat-<ver>.apk
+```
+
+The Linux setup downloads the toolchain under `.android-tools/` by default and
+requires `curl` or `wget`, `tar`, and `unzip`. Restore release media with
+`python3 scripts/restore_media.py <release-apk>` before building.
 
 Pipeline: `aapt2 compile/link` → `javac --release 11` → `d8` →
 `scripts/pack_apk_assets.py` (assets MUST go in with forward slashes —
