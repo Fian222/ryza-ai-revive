@@ -17,7 +17,14 @@ const sandbox = {
 sandbox.window = sandbox;
 sandbox.globalThis = sandbox;
 sandbox.Avatar = { _calls: [], setAtlasVariant(name) { this._calls.push(name); } };
-sandbox.Config = { section() { return {}; }, set() {}, get() { return {}; } };
+const store = {};
+sandbox.localStorage = {
+  getItem(k) { return k in store ? store[k] : null; },
+  setItem(k, v) { store[k] = String(v); },
+  removeItem(k) { delete store[k]; },
+  key(i) { return Object.keys(store)[i] ?? null; },
+  get length() { return Object.keys(store).length; }
+};
 sandbox.document = { getElementById() { return null; } };
 sandbox.XMLHttpRequest = function () {};
 sandbox.location = { origin: 'http://127.0.0.1:8765' };
@@ -26,6 +33,7 @@ vm.createContext(sandbox);
 function load(f) {
   vm.runInContext(fs.readFileSync(path.join(WEB, 'js', f), 'utf8'), sandbox, { filename: f });
 }
+load('config.js');
 load('nsfw.js');
 load('api.js');
 
@@ -34,22 +42,50 @@ ok(!!N && N.VARIANT === 'nsfw', 'Nsfw exported');
 ok(typeof N.detect !== 'function', 'no keyword detector');
 ok(typeof N.decide !== 'function', 'no keyword decide');
 ok(typeof N.promptSection !== 'function', 'policy is not duplicated in nsfw.js');
+ok(sandbox.Config.section('app').nsfwPermission === false && !N.permitted(),
+   'default permission is OFF');
 
 N.reset();
 ok(/着ている/.test(N.screenFact()), 'screenFact: dressed');
 N.onTurn({ nsfw: null });
 ok(N.active() === false, 'omitted tag does not strip');
 N.onTurn({ nsfw: true });
-ok(N.active() === true && sandbox.Avatar._calls.pop() === 'nsfw', 'tag nsfw:on');
+ok(N.active() === false && sandbox.Avatar._calls.pop() === 'default',
+   'permission OFF + tag nsfw:on remains dressed');
+N.setPermission(true);
+ok(N.permitted() && sandbox.Config.section('app').nsfwPermission === true &&
+   /"nsfwPermission":true/.test(store['ryza.settings.v1'] || ''),
+   'permission ON persists');
+N.onTurn({ nsfw: true });
+ok(N.active() === true && sandbox.Avatar._calls.pop() === 'nsfw',
+   'permission ON + tag nsfw:on');
 ok(/肌が見えている/.test(N.screenFact()), 'screenFact: undressed');
 N.onTurn({ nsfw: null });
 ok(N.active() === true, 'omitted tag keeps undressed');
 N.onTurn({ nsfw: false });
-ok(N.active() === false && sandbox.Avatar._calls.pop() === 'default', 'tag nsfw:off');
+ok(N.active() === false && sandbox.Avatar._calls.pop() === 'default',
+   'permission ON + tag nsfw:off');
 N.onTurn({ nsfw: true });
-ok(N.active() === true, 'llm can initiate');
+N.setPermission(false);
+ok(N.active() === false && sandbox.Avatar._calls.pop() === 'default',
+   'active NSFW + permission OFF restores default immediately');
+N.setPermission(true);
+N.onTurn({ nsfw: true });
+store['ryza.settings.v1'] = JSON.stringify({ app: { nsfwPermission: false } });
+load('config.js');
+N.syncPermission();
+ok(!N.permitted() && !N.active() && sandbox.Avatar._calls.pop() === 'default',
+   'loaded disabled permission cannot preserve active NSFW');
+N.setPermission(true);
+N.onTurn({ nsfw: true });
 N.reset();
-ok(N.active() === false && sandbox.Avatar._calls.pop() === 'default', 'reset → default');
+ok(N.active() === false && N.permitted() && sandbox.Avatar._calls.pop() === 'default',
+   'visual reset restores default without changing permission');
+N.onTurn({ nsfw: true });
+sandbox.Config.reset();
+N.syncPermission();
+ok(!N.permitted() && !N.active() && sandbox.Avatar._calls.pop() === 'default',
+   'settings reset disables permission and restores default');
 
 const A = sandbox.Api;
 if (A && A.parseTaggedReply) {
@@ -79,6 +115,7 @@ if (A && A.parseTaggedReply) {
   ok(!/すぐ脱がなくて/.test(sys), 'old delay-undress phrasing is gone');
   ok(tag.indexOf('tod:') === -1, 'real mode tag line has no tod slot');
   ok(!/<state>/.test(sys), 'no RPG context → no <state> example');
+  N.setPermission(true);
   N.onTurn({ nsfw: true });
   const sysOn = A.buildSystemPrompt('chat', 'voice', '', 'ja', N.screenFact());
   ok(/\|undress:on\|/.test(sysOn) && /肌が見えている/.test(sysOn),

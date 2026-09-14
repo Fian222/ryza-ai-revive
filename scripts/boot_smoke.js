@@ -196,14 +196,32 @@ for (const f of ['util.js', 'config.js', 'i18n.js', 'api.js', 'memory.js',
        'missed emotion tag is omit, not a reset to neutral');
     ok(sandbox.Nsfw && /着ている/.test(sandbox.Nsfw.screenFact()),
        'prompt tells the LLM she is dressed');
+    ok(C.section('app').nsfwPermission === false && !sandbox.Nsfw.permitted(),
+       'NSFW permission defaults OFF');
     sandbox.Nsfw.onTurn({ nsfw: null });
     ok(!sandbox.Nsfw.active(), 'omitted tag does not strip');
     sandbox.Nsfw.onTurn(nsfwTag);
-    ok(sandbox.Nsfw.active(), 'llm nsfw:on strips');
+    ok(!sandbox.Nsfw.active(), 'permission OFF blocks llm undress:on');
+    sandbox.Nsfw.setPermission(true);
+    sandbox.Nsfw.onTurn(nsfwTag);
+    ok(sandbox.Nsfw.active(), 'permission ON allows llm undress:on');
     ok(/肌が見えている/.test(sandbox.Nsfw.screenFact()),
        'prompt tells the LLM she is undressed');
-    sandbox.Nsfw.reset();
-    ok(!sandbox.Nsfw.active(), 'reset clears nsfw');
+    sandbox.Nsfw.onTurn({ nsfw: false });
+    ok(!sandbox.Nsfw.active(), 'permission ON + undress:off restores normal');
+    sandbox.Nsfw.onTurn(nsfwTag);
+    sandbox.Nsfw.setPermission(false);
+    ok(!sandbox.Nsfw.active(), 'turning permission OFF clears active NSFW');
+    sandbox.Nsfw.setPermission(true);
+    sandbox.Nsfw.onTurn(nsfwTag);
+    C.importJSON(JSON.stringify({ app: { nsfwPermission: false } }));
+    sandbox.Nsfw.syncPermission();
+    ok(!sandbox.Nsfw.active(), 'imported disabled permission cannot keep NSFW active');
+    sandbox.Nsfw.setPermission(true);
+    sandbox.Nsfw.onTurn(nsfwTag);
+    document.getElementById('btn-settings-reset').onclick();
+    ok(C.section('app').nsfwPermission === false && !sandbox.Nsfw.active(),
+       'settings reset disables permission and restores normal');
 
     sandbox.Config.set('app.timeMode', 'real');
     sandbox.Config.set('state.tod', 'aft');

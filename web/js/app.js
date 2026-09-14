@@ -113,6 +113,7 @@
 
     /* -------------------------------------------------------------- boot */
     init: function () {
+      if (window.Nsfw) Nsfw.syncPermission();
       I18n.setLang(Config.section('app').lang || 'zh');
       I18n.apply(document);
       var inpEl = document.getElementById('input');
@@ -464,7 +465,9 @@
       };
       document.getElementById('btn-settings-reset').onclick = function () {
         if (confirm('恢复所有设置为默认值？')) {
-          Config.reset(); App.buildSettings(); App.buildCharaForm();
+          Config.reset();
+          if (window.Nsfw) Nsfw.syncPermission();
+          App.buildSettings(); App.buildCharaForm();
           App.toast(I18n.t('toast.saved'));
         }
       };
@@ -2243,6 +2246,12 @@
         function (v) { Config.set('app.vibration', v); });
       App._switch(w, T('settings.rim'), Config.section('app').rim !== false,
         function (v) { Config.set('app.rim', v); });
+      App._switch(w, T('settings.nsfwPermission'),
+        Config.section('app').nsfwPermission === true,
+        function (v) {
+          if (window.Nsfw) Nsfw.setPermission(v);
+          else Config.set('app.nsfwPermission', v);
+        });
 
       /* ---------------- time passage (official drove it from AppServerClock) */
       App._title(w, T('settings.time'));
@@ -2319,7 +2328,9 @@
       bImp.onclick = function () {
         var txt = prompt('粘贴配置 JSON');
         if (!txt) return;
-        try { Config.importJSON(txt); App.buildSettings(); App.buildCharaForm();
+        try { Config.importJSON(txt);
+              if (window.Nsfw) Nsfw.syncPermission();
+              App.buildSettings(); App.buildCharaForm();
               App.toast(I18n.t('toast.saved')); }
         catch (e) { App.toast('配置解析失败：' + e.message, true); }
       };
@@ -2341,6 +2352,7 @@
           },
           onOk: function () {
             Config.eraseAll();
+            if (window.Nsfw) Nsfw.syncPermission();
             location.reload();
           }
         });
@@ -2477,6 +2489,7 @@
     _applySnapshot: function (snap) {
       if (!snap || !snap.settings) return;
       Config.importJSON(JSON.stringify(snap.settings));
+      if (window.Nsfw) Nsfw.syncPermission();
       App.history = snap.history || [];
       App.memory = snap.memory || [];
       App.saveMemory();
