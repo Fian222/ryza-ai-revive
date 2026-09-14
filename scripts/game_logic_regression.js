@@ -292,9 +292,9 @@ ok(/ライザの家/.test(World.promptBlock({ stage: 'stage_01_001_04', tod: 'af
    'reset to real after flow catalog check');
 const asmrSys = Api.buildSystemPrompt('asmr', 'voice', '', 'zh', '', pb);
 const asmrTag = (asmrSys.match(/^\[emotion:.+\]$/m) || [''])[0];
-ok(/\|undress:off\|/.test(asmrTag) && /stage:stage_01_001_04/.test(asmrTag) &&
+ok(!/undress:/.test(asmrTag) && /stage:stage_01_001_04/.test(asmrTag) &&
    !/stamina_delta/.test(asmrSys),
-   'asmr gets a filled travel prefix without RPG <state>');
+   'asmr gets a filled travel prefix without undress control or RPG <state>');
 ok(asmrTag.indexOf('tod:') === -1, 'real mode has no tod slot');
 ok(/sleep/.test(asmrSys), 'tag line teaches stage:sleep');
 Config.set('app.timeMode', 'flow');

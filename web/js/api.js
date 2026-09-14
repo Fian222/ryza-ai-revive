@@ -123,12 +123,11 @@
   }
 
   /* First-line machine prefix filled with what's already on screen, so a
-     copy-paste with no edits is a valid no-op. Screen fields live here;
+     copy-paste with no edits is a valid no-op. Model-controlled fields live here;
      bags / exp / money / quest / memory stay in trailing <state>. */
   function screenTagLine() {
     var emotion = 'happy';
     var attitude = 'agree';
-    var undress = 'off';
     var stage = 'stage_01_001_04';
     var tod = 'aft';
     try {
@@ -137,9 +136,6 @@
         if (av._emotion && EMOTIONS.indexOf(av._emotion) !== -1) emotion = av._emotion;
         if (av._attitude && ATTITUDES.indexOf(av._attitude) !== -1) attitude = av._attitude;
       }
-    } catch (e) {}
-    try {
-      if (window.Nsfw && Nsfw.active()) undress = 'on';
     } catch (e) {}
     try {
       var st = window.Config && Config.section('state');
@@ -153,7 +149,6 @@
     var parts = [
       'emotion:' + emotion,
       'attitude:' + attitude,
-      'undress:' + undress,
       'stage:' + stage
     ];
     if (llmDrivesClock()) parts.push('tod:' + tod);
@@ -187,7 +182,6 @@
     L.push('毎ターン1行目から書く。変わる欄だけ直す。');
     L.push('emotion: ' + EMOTIONS.join(' '));
     L.push('attitude: ' + ATTITUDES.join(' '));
-    L.push('undress: on=脱いだ / off=着た。断るなら値を変えない。セリフで脱いだ/着たなら必ず合わせる。');
     L.push('stage: 移動なら一覧のidか地名。寝るなら sleep。');
     if (llmDrivesClock()) {
       L.push('tod: 時を進めるなら mor|aft|eve|ngt か +N時間。');
@@ -213,7 +207,7 @@
 
   /* Live user turn only — not stored in App.history. Long chats bury the
      same line at the end of system; putting it next to the latest user
-     text keeps emotion / undress / stage from decaying together. */
+     text keeps emotion and stage from decaying together. */
   function withTurnCue(userText) {
     return String(userText || '') +
       '\n\n次の行をコピーし、このターン変わった欄だけ直す：\n' +

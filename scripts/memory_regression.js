@@ -177,7 +177,8 @@ Memory.add('session-b', 'session');
   ok(sysM.indexOf(memLine) > 0 &&
      sysM.indexOf(memLine) < sysM.indexOf('いまの画面'),
      'memory sits after static protocol, before per-turn screen facts');
-  ok(/undress:off/.test(sys) && /on=脱いだ/.test(sys), 'tag protocol still present');
+  ok(!/undress:/.test(sys) && !/on=脱いだ/.test(sys) && /いまの画面/.test(sys),
+     'prompt keeps screen fact without delegating undress control');
 
   console.log(failures ? '\nMEMORY: ' + failures + ' FAILURES' : '\nMEMORY: ALL PASS');
   process.exit(failures ? 1 : 0);

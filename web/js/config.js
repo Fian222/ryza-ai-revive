@@ -117,6 +117,7 @@
       fullscreen: false,
       rim: true,
       showBubble: true,              // talk bubbles over the stage (auto-fade)
+      nsfwPermission: false,         // user-controlled undress atlas state
       timeMode: 'real',              // real=墙钟(LLM不可拨) | flow=游戏钟(LLM可拨) | manual=🌤
       flowSpeed: 60,                 // flow: in-game minutes per real minute (60 ⇒ 1 game hr / real min)
       cheat: false                   // 作弊：体力 + 金币无限（地图/任务不改）
@@ -161,11 +162,16 @@
     return out;
   }
 
+  /* Keep DEFAULTS immutable: Config.set() mutates nested sections in place. */
+  function freshDefaults() {
+    return JSON.parse(JSON.stringify(DEFAULTS));
+  }
+
   var data;
   try {
-    data = deepMerge(DEFAULTS, JSON.parse(localStorage.getItem(KEY) || '{}'));
+    data = deepMerge(freshDefaults(), JSON.parse(localStorage.getItem(KEY) || '{}'));
   } catch (e) {
-    data = deepMerge(DEFAULTS, {});
+    data = freshDefaults();
   }
   if (data.state && data.state.skin) {
     data.state.skin = String(data.state.skin).replace(/_(01|99)$/, '');
@@ -208,14 +214,14 @@
       try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {}
     },
     reset: function () {
-      data = deepMerge(DEFAULTS, {});
+      data = freshDefaults();
       Config.save();
     },
     /* Whole-settings import/export, used by the settings screen. */
     exportJSON: function () { return JSON.stringify(data, null, 2); },
     importJSON: function (text) {
       var parsed = JSON.parse(text);
-      data = deepMerge(DEFAULTS, parsed);
+      data = deepMerge(freshDefaults(), parsed);
       if (data.state && data.state.skin) {
         data.state.skin = String(data.state.skin).replace(/_(01|99)$/, '');
       }
@@ -229,7 +235,7 @@
         if (k && k.indexOf('ryza.') === 0) doomed.push(k);
       }
       doomed.forEach(function (k) { localStorage.removeItem(k); });
-      data = deepMerge(DEFAULTS, {});          /* drop the in-memory copy too —
+      data = freshDefaults();                  /* drop the in-memory copy too —
         otherwise a stale Config.set() after a wipe resurrects the old save */
       Config._hydrated = Promise.resolve();   // never re-hydrate after a wipe
     },
