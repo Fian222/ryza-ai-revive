@@ -90,7 +90,7 @@ public final class AssetServer extends Thread {
             Headers hs = readHeaders(in);
             if ("OPTIONS".equals(method)) {
                 writeBytes(out, 204, "text/plain", new byte[0],
-                    "Access-Control-Allow-Headers: Authorization, Content-Type, api-key\r\n" +
+                    "Access-Control-Allow-Headers: Authorization, Content-Type, api-key, model\r\n" +
                     "Access-Control-Allow-Methods: GET, HEAD, POST, OPTIONS\r\n");
                 return;
             }
@@ -131,6 +131,7 @@ public final class AssetServer extends Thread {
         String contentType = "application/json";
         String authorization = null;
         String apiKey = null;
+        String model = null;
     }
 
     private Headers readHeaders(InputStream in) throws IOException {
@@ -146,6 +147,7 @@ public final class AssetServer extends Thread {
             else if ("content-type".equals(k)) h.contentType = v;
             else if ("authorization".equals(k)) h.authorization = v;
             else if ("api-key".equals(k)) h.apiKey = v;
+            else if ("model".equals(k)) h.model = v;
         }
         return h;
     }
@@ -186,6 +188,7 @@ public final class AssetServer extends Thread {
             up.setRequestProperty("User-Agent", "RyzaChat/1.2.13");
             if (hs.authorization != null) up.setRequestProperty("Authorization", hs.authorization);
             if (hs.apiKey != null) up.setRequestProperty("api-key", hs.apiKey);
+            if (hs.model != null) up.setRequestProperty("model", hs.model);
             if (body.length > 0) {
                 OutputStream ub = up.getOutputStream();
                 ub.write(body);

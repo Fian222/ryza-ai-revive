@@ -264,23 +264,23 @@ ok(A._localProxy(A._qwenHttpsUrl('http://dashscope-result-bj.oss-cn-beijing.aliy
    'proxied OSS download is https');
 
 /* --- Fish Audio Open API: host normalize + local-sample clone --- */
-const FISH = 'https://fishaudio.org/api/open/v1';
+const FISH = 'https://api.fish.audio';
 ok(!A.FISH_DEFAULT_VOICE, 'no shipped Fish voice id (clone from local samples)');
 ok(A._fishSampleUrls().indexOf('assets/audio/prologue/jp/prologue_08.m4a') >= 0,
    'clone candidates include JP prologue m4a');
 ok(A._fishSampleUrls().indexOf('assets/voice/ryza_wav/prologue_08.wav') >= 0,
    'clone candidates include converted wav');
-ok(A.FISH_TTS_MODELS.indexOf('fishaudio-s21pro-flash') >= 0, 'seed includes s21pro-flash');
-ok(A._fishApiRoot('') === FISH, 'empty Fish base → official Open API v1');
-ok(A._fishApiRoot('https://fishaudio.org/') === FISH, 'site root → /api/open/v1');
-ok(A._fishApiRoot('https://fishaudio.org/api/open/v1/') === FISH, 'trailing slash stripped');
+ok(A.FISH_TTS_MODELS.indexOf('s2.1-pro-free') >= 0, 'seed includes working s2.1-pro-free model');
+ok(A._fishApiRoot('') === FISH, 'empty Fish base → official API');
+ok(A._fishApiRoot('https://fishaudio.org/') === FISH, 'retired site root → official API');
+ok(A._fishApiRoot('https://fishaudio.org/api/open/v1/') === FISH, 'retired Open API root migrated');
 ok(A._fishApiRoot('https://fishaudio.org/api/open/v1/speech/tts') === FISH,
    'pasted TTS path stripped to root');
-ok(A._fishApiRoot('https://fishaudio.org/v1') === FISH, 'compat /v1 → Open API v1');
-ok(A._fishApiRoot('https://api.fish.audio/v1') === FISH, 'legacy api.fish.audio remapped');
-ok(A._fishApiRoot('https://fishaudio.org/api/open/v3') ===
-   'https://fishaudio.org/api/open/v3', 'explicit v3 root kept');
-ok(A._fishTtsUrl('') === FISH + '/speech/tts', 'TTS path is /speech/tts');
+ok(A._fishApiRoot('https://fishaudio.org/v1') === FISH, 'compat site /v1 → official API');
+ok(A._fishApiRoot('https://api.fish.audio/v1') === FISH, 'official /v1 normalized');
+ok(A._fishApiRoot('https://fishaudio.org/api/open/v3') === FISH,
+   'retired explicit Open API root migrated');
+ok(A._fishTtsUrl('') === FISH + '/v1/tts', 'TTS path is /v1/tts');
 ok(A._fishLanguage('ja') === 'ja' && A._fishLanguage('zh-tw') === 'zh-TW',
    'Fish language codes');
 ok(A._localProxy(A._fishTtsUrl('')).indexOf('/_proxy?u=') === 0,
