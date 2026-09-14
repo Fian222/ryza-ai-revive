@@ -76,9 +76,11 @@ async function proxyRequest(request, targetUrl) {
   const ct = request.headers.get('content-type');
   const auth = request.headers.get('authorization');
   const apiKey = request.headers.get('api-key');
+  const model = request.headers.get('model');
   if (ct) headers['Content-Type'] = ct;
   if (auth) headers.Authorization = auth;
   if (apiKey) headers['api-key'] = apiKey;
+  if (model) headers.model = model;
   const init = { method: request.method, headers };
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     init.body = Buffer.from(await request.arrayBuffer());

@@ -21,6 +21,13 @@
     history: [],
     memory: [],
     audio: null,
+    _voiceObjectUrl: null,
+    _voiceFinish: null,
+    _speechGen: 0,
+    _ttsJobs: [],
+    _ttsReadyUrls: {},
+    _ttsQueueDone: null,
+    _ttsTimingTrace: null,
     speaking: false,
     _typeTimer: null,
     _ringAlarm: null,
@@ -44,6 +51,38 @@
     buzz: function (ms) {
       if (!Config.section('app').vibration) return;
       if (navigator.vibrate) { try { navigator.vibrate(ms || 18); } catch (e) {} }
+    },
+
+    /* Opt-in diagnostics: add ?ttsTiming=1 or set localStorage
+       ryza.ttsTiming=1. Only stage names, elapsed time, chunk number, and
+       character counts are recorded; speech text, URLs, keys, and headers
+       are deliberately excluded. */
+    _ttsTimingEnabled: function () {
+      var query = '';
+      try { query = String(location.search || ''); } catch (e) {}
+      if (/(?:^|[?&])ttsTiming=1(?:&|$)/.test(query)) return true;
+      try { return localStorage.getItem('ryza.ttsTiming') === '1'; } catch (e2) { return false; }
+    },
+
+    _ttsTimingStart: function (generation) {
+      var now = (window.performance && performance.now) ? performance.now() : Date.now();
+      App._ttsTimingTrace = { generation: generation, started: now, events: [] };
+    },
+
+    _ttsTimingMark: function (name, meta) {
+      meta = meta || {};
+      var trace = App._ttsTimingTrace;
+      if (!trace || (meta.generation != null && meta.generation !== trace.generation)) return;
+      var now = (window.performance && performance.now) ? performance.now() : Date.now();
+      var event = { name: name, ms: Math.round(now - trace.started) };
+      if (meta.chunk != null) event.chunk = Number(meta.chunk) + 1;
+      if (meta.chars != null) event.chars = Number(meta.chars);
+      trace.events.push(event);
+      if (App._ttsTimingEnabled() && window.console && console.debug) {
+        console.debug('[TTS timing #' + trace.generation + '] ' + event.ms + 'ms ' + name +
+          (event.chunk ? ' chunk=' + event.chunk : '') +
+          (event.chars != null ? ' chars=' + event.chars : ''));
+      }
     },
 
     _ensureVoiceGraph: function () {
@@ -341,7 +380,7 @@
         document.querySelectorAll('.mode-pill[data-style]').forEach(function (x) {
           x.classList.toggle('active', x.getAttribute('data-style') === st.style);
         });
-        if (st.style !== 'voice' && App.audio) App.audio.pause();
+        if (st.style !== 'voice') App._cancelSpeechQueue();
       };
       App._syncVoicePill = vsync;
       vsync();
@@ -465,6 +504,7 @@
       };
       document.getElementById('btn-settings-reset').onclick = function () {
         if (confirm('恢复所有设置为默认值？')) {
+          App._cancelSpeechQueue();
           Config.reset();
           if (window.Nsfw) Nsfw.syncPermission();
           App.buildSettings(); App.buildCharaForm();
@@ -1124,6 +1164,10 @@
           body.appendChild(p);
         },
         onOk: function () {
+          App._cancelSpeechQueue();
+          if (App._typeTimer) clearTimeout(App._typeTimer);
+          App._typeTimer = null;
+          App._typeGen++;
           App.history = [];
           App._pages = []; App._pageSel = -1;
           var dots = document.getElementById('log-dots');
@@ -1148,6 +1192,7 @@
 
     say: function (text) {
       var st = Config.section('state');
+      var speechGen = App._cancelSpeechQueue();
       if (!Config.section('llm').apiKey) {
         App.toast(I18n.t('toast.needKey'), true);
         App.showView('settings');
@@ -1159,6 +1204,10 @@
         return;
       }
       App._lastText = text;
+      App._ttsTimingStart(speechGen);
+      if (App._typeTimer) clearTimeout(App._typeTimer);
+      App._typeTimer = null;
+      App._typeGen++;
       var retryBar = document.getElementById('retry-bar');
       if (retryBar) retryBar.classList.add('hidden');
       App.speaking = true;
@@ -1168,11 +1217,18 @@
 
       Api.chat(App.history, text, {
         mode: st.mode, style: st.style,
+        speechGeneration: speechGen,
         rpgContext: App._rpgContext(),
         sceneSection: App._sceneContext(),
         nsfwSection: window.Nsfw ? Nsfw.screenFact() : ''
       })
         .then(function (reply) {
+          App._ttsTimingMark('first_usable_assistant_text', {
+            generation: speechGen, chars: reply.text.length
+          });
+          App._ttsTimingMark('final_assistant_text', {
+            generation: speechGen, chars: reply.text.length
+          });
           App.speaking = false;
           document.getElementById('btn-send').disabled = false;
           App.history.push({ role: 'user', content: text });
@@ -1198,9 +1254,14 @@
             role: 'assistant',
             content: Api.formatHistoryReply(reply.text)
           });
+          /* Speech preparation starts from the finalized response immediately;
+             the visual typewriter continues independently and never gates TTS. */
           App.typeBubble(reply.text, function () {
-            App.speakThen(reply.text, reply.emotion);
+            App._ttsTimingMark('ui_text_reveal_complete', {
+              generation: speechGen, chars: reply.text.length
+            });
           });
+          App.speakThen(reply.text, reply.emotion, speechGen);
 
           /* Talk-quests advance once per turn — if the LLM already reported
              quest progress through <state>, don't double-count it here. */
@@ -1218,65 +1279,152 @@
         });
     },
 
-    speakThen: function (text, emotion) {
+    speakThen: function (text, emotion, generation) {
       var st = Config.section('state');
       var app = Config.section('app');
-      if (!app.voice || st.style === 'text' || Config.section('tts').mode === 'off') return;
-      /* language matrix: display stays in the reply language; when the TTS
-         slot asks for a different one, translate first, then synthesize. */
+      var tts = Config.section('tts');
+      if (!app.voice || st.style === 'text' || tts.mode === 'off') return Promise.resolve();
+      if (generation == null) {
+        generation = App._cancelSpeechQueue();
+        App._ttsTimingStart(generation);
+      }
+      var gen = generation;
+      if (gen !== App._speechGen) return Promise.resolve();
       var replyL = (window.Langs && Langs.llm()) || 'ja';
       var ttsL = (window.Langs && Langs.tts()) || replyL;
-      var prep = (ttsL !== replyL && Api.translate)
-        ? Api.translate(text, ttsL) : Promise.resolve(text);
-      prep.then(function (speakText) {
-        /* mode selects the per-mode TTS voice direction (ASMR whisper…) */
-        return Api.speak(speakText, ttsL, st.mode);
-      }).then(function (url) {
-        /* Talking starts when the audio actually exists — before that the
-           mouth sat closed (RMS target 0) for the whole TTS latency, and a
-           failed synth left _talking stuck true forever. */
-        if (!url) return;
-        App.playUrl(url, Api.MODE_PLAY_FX[st.mode] || null);
-      }).catch(function (e) {
+      var chunks = tts.provider === 'fish' && Api.speechChunks
+        ? Api.speechChunks(text, 80, 200) : [String(text || '').trim()].filter(Boolean);
+      var jobs = App._ttsJobs = [];
+      App._ttsReadyUrls = {};
+      var fx = Api.MODE_PLAY_FX[st.mode] || null;
+
+      function discard(url) {
+        if (url && /^blob:/i.test(url)) {
+          try { URL.revokeObjectURL(url); } catch (e) {}
+        }
+      }
+      function prepare(index) {
+        if (jobs[index]) return jobs[index];
+        var chunk = chunks[index];
+        var meta = { generation: gen, chunk: index, chars: chunk.length };
+        App._ttsTimingMark('speech_translation_start', meta);
+        var translated = (ttsL !== replyL && Api.translate)
+          ? Api.translate(chunk, ttsL) : Promise.resolve(chunk);
+        jobs[index] = translated.then(function (speakText) {
+          App._ttsTimingMark('speech_translation_end', {
+            generation: gen, chunk: index, chars: String(speakText || '').length
+          });
+          if (gen !== App._speechGen) return null;
+          return Api.speak(speakText, ttsL, st.mode, meta);
+        }).then(function (url) {
+          if (gen !== App._speechGen) { discard(url); return null; }
+          if (url) App._ttsReadyUrls[index] = url;
+          return url;
+        });
+        return jobs[index];
+      }
+      function play(index) {
+        if (gen !== App._speechGen || index >= chunks.length) return Promise.resolve();
+        return prepare(index).then(function (url) {
+          if (gen !== App._speechGen) { discard(url); return; }
+          if (!url) return;
+          delete App._ttsReadyUrls[index];
+          /* Keep exactly one later chunk preparing while this one plays. */
+          if (index + 1 < chunks.length) prepare(index + 1).catch(function () {});
+          return App.playUrl(url, fx, {
+            generation: gen, chunk: index, chars: chunks[index].length
+          }).then(function (reason) {
+            if (reason === 'ended' && gen === App._speechGen) return play(index + 1);
+            if (gen === App._speechGen) App._cancelSpeechQueue();
+          });
+        });
+      }
+
+      App._ttsQueueDone = play(0).catch(function (e) {
+        if (gen !== App._speechGen) return;
         App.toast(e.message === 'NO_KEY' ? I18n.t('toast.needKey')
               : e.message === 'NO_MODEL' ? I18n.t('toast.needModel')
               : I18n.t('toast.ttsFail') + e.message, true);
       });
+      return App._ttsQueueDone;
     },
 
     /* fx: optional { rate, gain } per-mode playback shaping (see
        Api.MODE_PLAY_FX — ASMR slows and softens even on endpoints that
        ignore voice instructions). */
-    playUrl: function (url, fx) {
+    playUrl: function (url, fx, timing) {
       App._ensureVoiceGraph();
       if (App._voiceCtx && App._voiceCtx.state === 'suspended') {
         App._voiceCtx.resume().catch(function () {});
       }
       var a = App.audio;
+      App._pauseVoice();
+      App._voiceObjectUrl = url;
       a.src = url;
       var base = (window.Sound && Sound._gain) ? Sound._gain('voice')
         : (Number(Config.section('app').volume) || 0.9);
       a.volume = Math.max(0, Math.min(1, base * ((fx && fx.gain) || 1)));
       a.playbackRate = (fx && fx.rate) || 1;
-      a.onended = function () {
-        a.playbackRate = 1;
-        Avatar.setTalking(false);
-        URL.revokeObjectURL(url);
-        App._bubbleHold(1600);   /* done talking → bubble steps aside */
-      };
-      Avatar.setTalking(true);
-      App._bubbleKeep();         /* stay put while she talks */
-      a.play().catch(function () { Avatar.setTalking(false); });
       App.buzz();
+      return new Promise(function (resolve) {
+        var settled = false;
+        function finish(reason) {
+          if (settled) return;
+          settled = true;
+          if (App._voiceFinish === finish) App._voiceFinish = null;
+          a.playbackRate = 1;
+          Avatar.setTalking(false);
+          if (App._voiceObjectUrl === url) App._releaseVoiceUrl();
+          resolve(reason);
+        }
+        App._voiceFinish = finish;
+        a.onended = function () {
+          finish('ended');
+          App._bubbleHold(1600);   /* done talking → bubble steps aside */
+        };
+        Avatar.setTalking(true);
+        App._bubbleKeep();         /* stay put while she talks */
+        Promise.resolve(a.play()).then(function () {
+          if (timing) App._ttsTimingMark('audio_playback_start', timing);
+        }).catch(function () { finish('error'); });
+      });
+    },
+
+    _releaseVoiceUrl: function () {
+      var url = App._voiceObjectUrl;
+      App._voiceObjectUrl = null;
+      if (url && /^blob:/i.test(url)) {
+        try { URL.revokeObjectURL(url); } catch (e) {}
+      }
     },
 
     _pauseVoice: function () {
       if (App.audio) { try { App.audio.pause(); } catch (e) {} }
-      if (Avatar && Avatar.setTalking) Avatar.setTalking(false);
+      var finish = App._voiceFinish;
+      if (finish) finish('interrupted');
+      else {
+        App._releaseVoiceUrl();
+        if (Avatar && Avatar.setTalking) Avatar.setTalking(false);
+      }
+    },
+
+    _cancelSpeechQueue: function () {
+      App._speechGen++;
+      Object.keys(App._ttsReadyUrls || {}).forEach(function (key) {
+        var url = App._ttsReadyUrls[key];
+        if (url && /^blob:/i.test(url)) {
+          try { URL.revokeObjectURL(url); } catch (e) {}
+        }
+      });
+      App._ttsReadyUrls = {};
+      App._ttsJobs = [];
+      App._pauseVoice();
+      return App._speechGen;
     },
 
     playFile: function (path, vol, force) {
       if (!force && !Config.section('app').voice) return;
+      App._cancelSpeechQueue();
       App._ensureVoiceGraph();
       if (App._voiceCtx && App._voiceCtx.state === 'suspended') {
         App._voiceCtx.resume().catch(function () {});
@@ -1458,8 +1606,7 @@
 
     _dismissAlarm: function () {
       document.getElementById('overlay-alarm').classList.add('hidden');
-      if (App.audio) { try { App.audio.pause(); } catch (e) {} }
-      Avatar.setTalking(false);
+      App._cancelSpeechQueue();
       App._ringAlarm = null;
     },
 
@@ -2348,6 +2495,7 @@
             body.appendChild(p);
           },
           onOk: function () {
+            App._cancelSpeechQueue();
             Config.eraseAll();
             if (window.Nsfw) Nsfw.syncPermission();
             location.reload();
@@ -2376,12 +2524,13 @@
               : tts.apiKey;
       if (!key) { App.toast(I18n.t('toast.needKey'), true); return; }
       var model = tts.provider === 'qwen' ? (tts.qwenModel || 'qwen3-tts-flash')
-                : tts.provider === 'fish' ? (tts.fishModel || 'fishaudio-s21pro-flash')
+                : tts.provider === 'fish' ? (tts.fishModel || 's2.1-pro-free')
                 : (tts.mode === 'clone' ? tts.modelClone : tts.modelPreset);
       if (tts.provider !== 'fish' && Api.isPlaceholderModel(model)) {
         App.toast(I18n.t('toast.needModel'), true); return;
       }
       App.toast('合成中…');
+      App._cancelSpeechQueue();
       /* no explicit mode → Api.speak uses the live talk mode, so this
          doubles as a preview of the per-mode voice direction. */
       Api.speak('やあ、聞こえてる？').then(function (url) {
@@ -2447,7 +2596,11 @@
       var b2 = document.createElement('button');
       b2.className = 'btn danger'; b2.textContent = '清空对话记忆';
       b2.onclick = function () {
-        if (confirm('清空当前对话历史？')) { App.history = []; App.toast('已清空'); }
+        if (confirm('清空当前对话历史？')) {
+          App._cancelSpeechQueue();
+          App.history = [];
+          App.toast('已清空');
+        }
       };
       row.appendChild(b2);
       w.appendChild(row);
