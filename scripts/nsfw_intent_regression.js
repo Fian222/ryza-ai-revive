@@ -42,57 +42,64 @@ ok(!!N && N.VARIANT === 'nsfw', 'Nsfw exported');
 ok(typeof N.detect !== 'function', 'no keyword detector');
 ok(typeof N.decide !== 'function', 'no keyword decide');
 ok(typeof N.promptSection !== 'function', 'policy is not duplicated in nsfw.js');
-ok(sandbox.Config.section('app').nsfwPermission === false && !N.permitted(),
-   'default permission is OFF');
+ok(sandbox.Config.section('app').nsfwPermission === false && !N.active(),
+   'default setting is OFF');
 
-N.reset();
-ok(/着ている/.test(N.screenFact()), 'screenFact: dressed');
-N.onTurn({ nsfw: null });
-ok(N.active() === false, 'omitted tag does not strip');
-N.onTurn({ nsfw: true });
-ok(N.active() === false && sandbox.Avatar._calls.pop() === 'default',
-   'permission OFF + tag nsfw:on remains dressed');
+N.syncPermission();
+ok(!N.active() && sandbox.Avatar._calls.pop() === 'default',
+   'default setting OFF applies normal atlas');
 N.setPermission(true);
-ok(N.permitted() && sandbox.Config.section('app').nsfwPermission === true &&
+ok(N.active() && sandbox.Config.section('app').nsfwPermission === true &&
+   sandbox.Avatar._calls.pop() === 'nsfw' &&
    /"nsfwPermission":true/.test(store['ryza.settings.v1'] || ''),
-   'permission ON persists');
-N.onTurn({ nsfw: true });
-ok(N.active() === true && sandbox.Avatar._calls.pop() === 'nsfw',
-   'permission ON + tag nsfw:on');
-ok(/肌が見えている/.test(N.screenFact()), 'screenFact: undressed');
-N.onTurn({ nsfw: null });
-ok(N.active() === true, 'omitted tag keeps undressed');
-N.onTurn({ nsfw: false });
-ok(N.active() === false && sandbox.Avatar._calls.pop() === 'default',
-   'permission ON + tag nsfw:off');
-N.onTurn({ nsfw: true });
+   'user setting ON persists and applies NSFW atlas immediately');
+ok(/肌が見えている/.test(N.screenFact()),
+   'screenFact derives undressed state from user setting');
 N.setPermission(false);
-ok(N.active() === false && sandbox.Avatar._calls.pop() === 'default',
-   'active NSFW + permission OFF restores default immediately');
-N.setPermission(true);
+ok(!N.active() && sandbox.Avatar._calls.pop() === 'default',
+   'user setting OFF applies normal atlas immediately');
+
+let calls = sandbox.Avatar._calls.length;
 N.onTurn({ nsfw: true });
+ok(!N.active() && sandbox.Avatar._calls.length === calls,
+   'setting OFF + LLM undress:on remains normal');
+N.setPermission(true);
+calls = sandbox.Avatar._calls.length;
+N.onTurn({ nsfw: false });
+ok(N.active() && sandbox.Avatar._calls.length === calls,
+   'setting ON + LLM undress:off remains NSFW');
+
+store['ryza.settings.v1'] = JSON.stringify({ app: { nsfwPermission: true } });
+load('config.js');
+N.syncPermission();
+ok(N.active() && sandbox.Avatar._calls.pop() === 'nsfw',
+   'reload with setting ON restores NSFW atlas');
 store['ryza.settings.v1'] = JSON.stringify({ app: { nsfwPermission: false } });
 load('config.js');
 N.syncPermission();
-ok(!N.permitted() && !N.active() && sandbox.Avatar._calls.pop() === 'default',
-   'loaded disabled permission cannot preserve active NSFW');
+ok(!N.active() && sandbox.Avatar._calls.pop() === 'default',
+   'reload with setting OFF restores normal atlas');
+
 N.setPermission(true);
-N.onTurn({ nsfw: true });
 N.reset();
-ok(N.active() === false && N.permitted() && sandbox.Avatar._calls.pop() === 'default',
-   'visual reset restores default without changing permission');
-N.onTurn({ nsfw: true });
+ok(N.active() && sandbox.Avatar._calls.pop() === 'nsfw',
+   'legacy visual reset cannot override the user setting');
 sandbox.Config.reset();
 N.syncPermission();
-ok(!N.permitted() && !N.active() && sandbox.Avatar._calls.pop() === 'default',
-   'settings reset disables permission and restores default');
+ok(!N.active() && sandbox.Avatar._calls.pop() === 'default',
+   'full settings reset disables NSFW and restores normal atlas');
 
 const A = sandbox.Api;
 if (A && A.parseTaggedReply) {
   const on = A.parseTaggedReply('[emotion:shy|attitude:agree|undress:on]\nやっ');
-  ok(on.nsfw === true && on.emotion === 'shy', 'tag undress:on + extra pipe');
+  ok(on.nsfw === true && on.emotion === 'shy' && on.text === 'やっ',
+     'tag undress:on parses and is stripped from dialogue');
   const alias = A.parseTaggedReply('[emotion:shy|nsfw:on]\nやっ');
-  ok(alias.nsfw === true, 'nsfw:on still accepted as undress alias');
+  ok(alias.nsfw === true && alias.text === 'やっ',
+     'nsfw:on alias parses and is stripped from dialogue');
+  const aliasOff = A.parseTaggedReply('[emotion:happy|nsfw:off]\nhi');
+  ok(aliasOff.nsfw === false && aliasOff.text === 'hi',
+     'nsfw:off alias parses and is stripped from dialogue');
   const off = A.parseTaggedReply('[emotion:happy|attitude:agree|undress:off]\nhi');
   ok(off.nsfw === false, 'tag undress:off');
   const omit = A.parseTaggedReply('[emotion:happy|attitude:agree]\nhi');
@@ -108,19 +115,28 @@ if (A && A.parseTaggedReply) {
      'no tag line → omit all (keep last on screen)');
   const sys = A.buildSystemPrompt('chat', 'voice', '', 'ja', N.screenFact());
   const tag = (sys.match(/^\[emotion:.+\]$/m) || [''])[0];
-  ok(tag === '[emotion:happy|attitude:agree|undress:off|stage:stage_01_001_04]',
-     'prefix is filled from the current screen (dressed, home)');
-  ok(/断るなら/.test(sys) && /on=脱いだ/.test(sys) && /undress:/.test(sys),
-     'refuse = leave undress, undress = on');
-  ok(!/すぐ脱がなくて/.test(sys), 'old delay-undress phrasing is gone');
+  ok(tag === '[emotion:happy|attitude:agree|stage:stage_01_001_04]',
+     'model prefix omits user-controlled undress state');
+  ok(!/on=脱いだ/.test(sys) && !/undress:/.test(sys),
+     'prompt gives the model no undress control instruction');
   ok(tag.indexOf('tod:') === -1, 'real mode tag line has no tod slot');
   ok(!/<state>/.test(sys), 'no RPG context → no <state> example');
   N.setPermission(true);
-  N.onTurn({ nsfw: true });
   const sysOn = A.buildSystemPrompt('chat', 'voice', '', 'ja', N.screenFact());
-  ok(/\|undress:on\|/.test(sysOn) && /肌が見えている/.test(sysOn),
-     'undressed screen fills undress:on in the prefix');
-  N.reset();
+  ok(!/undress:/.test(sysOn) && /肌が見えている/.test(sysOn),
+     'screen fact reflects setting ON without exposing model control');
+  calls = sandbox.Avatar._calls.length;
+  N.onTurn(alias);
+  ok(N.active() && sandbox.Avatar._calls.length === calls,
+     'legacy nsfw:on alias cannot change NSFW setting ON');
+  N.onTurn(aliasOff);
+  ok(N.active() && sandbox.Avatar._calls.length === calls,
+     'legacy nsfw:off alias cannot change NSFW setting ON');
+  N.setPermission(false);
+  calls = sandbox.Avatar._calls.length;
+  N.onTurn(alias);
+  ok(!N.active() && sandbox.Avatar._calls.length === calls,
+     'legacy nsfw:on alias cannot change NSFW setting OFF');
   const keepN = A.parseTaggedReply('[emotion:shy|undress:keep|stage:keep]\nhi');
   ok(keepN.nsfw == null && !keepN.state, 'undress:keep / stage:keep still mean omit');
   const echoOff = A.parseTaggedReply('[emotion:happy|undress:off|stage:stage_01_001_04]\nhi');
@@ -136,13 +152,14 @@ if (A && A.parseTaggedReply) {
      bag.state.inventory_added[0].id === 'emeralia' && !bag.state.current_stage,
      'screen fields on the tag; bags in <state>');
   const hist = A.formatHistoryReply('やっ');
-  ok(hist.indexOf('[emotion:happy|attitude:agree|undress:off|stage:') === 0 &&
+  ok(hist.indexOf('[emotion:happy|attitude:agree|stage:') === 0 &&
+     hist.indexOf('undress:') === -1 &&
      /\nやっ$/.test(hist),
-     'history stores the full screen line + spoken text');
+     'history stores only model-controlled screen fields + spoken text');
   ok(!/<state>/.test(hist), 'history does not echo RPG deltas');
   const cued = A.withTurnCue('脱いで');
-  ok(/^脱いで\n/.test(cued) && /undress:off/.test(cued) && /セリフ/.test(cued),
-     'live user turn keeps player text and appends the copy cue');
+  ok(/^脱いで\n/.test(cued) && !/undress:/.test(cued) && /セリフ/.test(cued),
+     'live user turn cue does not delegate undress control');
 } else {
   bad('Api.parseTaggedReply missing');
 }

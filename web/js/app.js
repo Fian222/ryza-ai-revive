@@ -1125,7 +1125,6 @@
         },
         onOk: function () {
           App.history = [];
-          if (window.Nsfw) Nsfw.reset();
           App._pages = []; App._pageSel = -1;
           var dots = document.getElementById('log-dots');
           if (dots) dots.innerHTML = '';
@@ -1188,15 +1187,13 @@
           var cost = Game.turnCost(st.mode, st.style);
           Game.spend(cost, 'talk');
 
-          if (window.Nsfw) Nsfw.onTurn(reply);
-          /* Omit = keep (same as undress). A missed tag must not snap the face
-             back to neutral/agree. */
+          /* A missed tag must not snap the face back to neutral/agree. */
           if (reply.emotion || reply.attitude) {
             Avatar.setEmotion(reply.emotion, reply.attitude);
           }
           /* After side effects so the echoed line matches the new screen.
-             All fields (emotion / undress / stage) live on this one line —
-             stripping it from history made every column decay together. */
+             Model-controlled screen fields live on this one line; stripping
+             it from history made every column decay together. */
           App.history.push({
             role: 'assistant',
             content: Api.formatHistoryReply(reply.text)

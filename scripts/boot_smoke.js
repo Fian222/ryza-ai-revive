@@ -112,6 +112,7 @@ sandbox.cancelAnimationFrame = () => {};
 
 /* module stubs that would need real GL / network */
 const Avatar = {
+  _atlasVariant: null, _variantCalls: [],
   _initCb: null,
   init(cb) { this._initCb = cb; setTimeout(cb, 0); },
   resize() {}, onModeChange() {}, setHidden() {}, setEmotion() {}, setTalking() {},
@@ -119,7 +120,8 @@ const Avatar = {
   loadSkin(id, cb) { cb && cb(); }, postureKey() { return 'posture_sitting'; },
   supportsBothPostures() { return false; }, hitPartAt() { return null; },
   poke() { return null; }, outfitOf(id) { return String(id).replace(/_(01|99)$/, ''); },
-  setAtlasVariant() {}, variantPageUrls() { return []; }
+  setAtlasVariant(name) { this._atlasVariant = name; this._variantCalls.push(name); },
+  variantPageUrls() { return []; }
 };
 sandbox.Avatar = Avatar;
 sandbox.Onboarding = {
@@ -194,34 +196,43 @@ for (const f of ['util.js', 'config.js', 'i18n.js', 'api.js', 'memory.js',
     const omitFace = A.parseTaggedReply('タグなし');
     ok(omitFace.emotion == null && omitFace.attitude == null,
        'missed emotion tag is omit, not a reset to neutral');
-    ok(sandbox.Nsfw && /着ている/.test(sandbox.Nsfw.screenFact()),
-       'prompt tells the LLM she is dressed');
-    ok(C.section('app').nsfwPermission === false && !sandbox.Nsfw.permitted(),
-       'NSFW permission defaults OFF');
-    sandbox.Nsfw.onTurn({ nsfw: null });
-    ok(!sandbox.Nsfw.active(), 'omitted tag does not strip');
+    ok(sandbox.Nsfw && !sandbox.Nsfw.active() && Avatar._atlasVariant === 'default' &&
+       /着ている/.test(sandbox.Nsfw.screenFact()),
+       'default NSFW setting OFF applies normal atlas');
+    let variantCalls = Avatar._variantCalls.length;
     sandbox.Nsfw.onTurn(nsfwTag);
-    ok(!sandbox.Nsfw.active(), 'permission OFF blocks llm undress:on');
+    ok(!sandbox.Nsfw.active() && Avatar._atlasVariant === 'default' &&
+       Avatar._variantCalls.length === variantCalls,
+       'setting OFF ignores LLM undress:on');
     sandbox.Nsfw.setPermission(true);
-    sandbox.Nsfw.onTurn(nsfwTag);
-    ok(sandbox.Nsfw.active(), 'permission ON allows llm undress:on');
+    ok(sandbox.Nsfw.active() && Avatar._atlasVariant === 'nsfw',
+       'user setting ON applies NSFW atlas immediately');
     ok(/肌が見えている/.test(sandbox.Nsfw.screenFact()),
-       'prompt tells the LLM she is undressed');
+       'screen fact follows user setting ON');
+    variantCalls = Avatar._variantCalls.length;
     sandbox.Nsfw.onTurn({ nsfw: false });
-    ok(!sandbox.Nsfw.active(), 'permission ON + undress:off restores normal');
-    sandbox.Nsfw.onTurn(nsfwTag);
+    ok(sandbox.Nsfw.active() && Avatar._atlasVariant === 'nsfw' &&
+       Avatar._variantCalls.length === variantCalls,
+       'setting ON ignores LLM undress:off');
     sandbox.Nsfw.setPermission(false);
-    ok(!sandbox.Nsfw.active(), 'turning permission OFF clears active NSFW');
+    ok(!sandbox.Nsfw.active() && Avatar._atlasVariant === 'default',
+       'user setting OFF applies normal atlas immediately');
     sandbox.Nsfw.setPermission(true);
-    sandbox.Nsfw.onTurn(nsfwTag);
     C.importJSON(JSON.stringify({ app: { nsfwPermission: false } }));
     sandbox.Nsfw.syncPermission();
-    ok(!sandbox.Nsfw.active(), 'imported disabled permission cannot keep NSFW active');
+    ok(!sandbox.Nsfw.active() && Avatar._atlasVariant === 'default',
+       'imported setting OFF restores normal atlas');
     sandbox.Nsfw.setPermission(true);
-    sandbox.Nsfw.onTurn(nsfwTag);
+    sandbox.App.history = [{ role: 'user', content: 'old' }];
+    sandbox.App._confirmNewTalk();
+    document.getElementById('modal').onsubmit({ preventDefault() {} });
+    ok(sandbox.Nsfw.active() && C.section('app').nsfwPermission === true &&
+       Avatar._atlasVariant === 'nsfw' && sandbox.App.history.length === 0,
+       'new conversation retains user NSFW setting');
     document.getElementById('btn-settings-reset').onclick();
-    ok(C.section('app').nsfwPermission === false && !sandbox.Nsfw.active(),
-       'settings reset disables permission and restores normal');
+    ok(C.section('app').nsfwPermission === false && !sandbox.Nsfw.active() &&
+       Avatar._atlasVariant === 'default',
+       'full settings reset disables NSFW and restores normal atlas');
 
     sandbox.Config.set('app.timeMode', 'real');
     sandbox.Config.set('state.tod', 'aft');
@@ -248,13 +259,13 @@ for (const f of ['util.js', 'config.js', 'i18n.js', 'api.js', 'memory.js',
       var m = String(sys).match(/^\[emotion:.+\]$/m);
       return m ? m[0] : '';
     }
-    ok(/undress:off/.test(tagLine(A.buildSystemPrompt('chat', 'voice', '', 'ja', '',
+    ok(!/undress:/.test(tagLine(A.buildSystemPrompt('chat', 'voice', '', 'ja', '',
        sandbox.App._sceneContext()))) &&
        /stage:stage_01_001_04/.test(tagLine(A.buildSystemPrompt('chat', 'voice', '', 'ja', '',
        sandbox.App._sceneContext()))) &&
        tagLine(A.buildSystemPrompt('chat', 'voice', '', 'ja', '',
        sandbox.App._sceneContext())).indexOf('tod:') === -1,
-       'real 出力形式 fills undress+stage, no tod slot');
+       'real output prefix omits undress control and fills stage, no tod slot');
     sandbox.Config.set('app.timeMode', 'flow');
     ok(/tod:/.test(tagLine(A.buildSystemPrompt('chat', 'voice', '', 'ja', '',
        sandbox.App._sceneContext()))),
