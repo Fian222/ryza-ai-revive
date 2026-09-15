@@ -375,9 +375,10 @@
     return true;
   }
 
-  function request(url, body, apiKey, timeoutMs) {
+  function request(url, body, apiKey, timeoutMs, lifecycle) {
     return new Promise(function (resolve, reject) {
       var xhr = new XMLHttpRequest();
+      var responseStarted = false;
       xhr.open('POST', url, true);
       xhr.timeout = timeoutMs || 120000;
       xhr.setRequestHeader('Content-Type', 'application/json');
@@ -385,7 +386,17 @@
         xhr.setRequestHeader('Authorization', 'Bearer ' + apiKey);
         xhr.setRequestHeader('api-key', apiKey);
       }
+      function responseStart() {
+        if (responseStarted) return;
+        responseStarted = true;
+        if (lifecycle && lifecycle.responseStart) lifecycle.responseStart();
+      }
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState >= 2) responseStart();
+      };
+      xhr.onprogress = responseStart;
       xhr.onload = function () {
+        responseStart();
         var j = null;
         try { j = JSON.parse(xhr.responseText); } catch (e) {}
         if (xhrJsonOk(xhr, j)) resolve(j);
@@ -393,6 +404,7 @@
       };
       xhr.onerror = function () { reject(new Error('网络请求失败（跨域或未走本地代理）')); };
       xhr.ontimeout = function () { reject(new Error('请求超时')); };
+      if (lifecycle && lifecycle.requestStart) lifecycle.requestStart();
       xhr.send(JSON.stringify(body));
     });
   }
@@ -439,19 +451,49 @@
     return '';
   }
 
-  /* Fish Open API TTS returns audio bytes (or JSON metadata when cache=true). */
-  function requestAudio(url, body, apiKey, timeoutMs) {
+  function redactSecret(value, secret) {
+    var out = String(value || '');
+    var key = String(secret || '');
+    return key ? out.split(key).join('[redacted]') : out;
+  }
+
+  function fishErrorMessage(status, raw, apiKey, phase) {
+    var label = phase === 'clone' ? 'voice clone/reference creation' : 'TTS generation';
+    if (status === 401) return 'Fish Audio: invalid or missing API key';
+    if (status === 403) return 'Fish Audio: permission, model, or reference access denied';
+    if (status === 429) return 'Fish Audio: rate limit or quota exceeded';
+    var j = null;
+    try { j = JSON.parse(String(raw || '')); } catch (e) {}
+    var detail = redactSecret(apiErrorMessage(j, status, raw), apiKey);
+    return 'Fish Audio ' + label + ' failed' + (detail ? ': ' + detail : '');
+  }
+
+  /* Fish /v1/tts returns audio bytes, not a JSON success payload. */
+  function requestAudio(url, body, apiKey, timeoutMs, extraHeaders) {
     return new Promise(function (resolve, reject) {
       var xhr = new XMLHttpRequest();
+      var firstByte = false;
+      var timing = extraHeaders && extraHeaders._timing;
       xhr.open('POST', url, true);
       xhr.timeout = timeoutMs || 180000;
       xhr.responseType = 'arraybuffer';
       xhr.setRequestHeader('Content-Type', 'application/json');
       if (apiKey) {
         xhr.setRequestHeader('Authorization', 'Bearer ' + apiKey);
-        xhr.setRequestHeader('api-key', apiKey);
       }
+      Object.keys(extraHeaders || {}).forEach(function (name) {
+        if (name === '_timing') return;
+        xhr.setRequestHeader(name, extraHeaders[name]);
+      });
+      function sawFirstByte() {
+        if (firstByte) return;
+        firstByte = true;
+        if (timing) timingMark('fish_response_first_byte', timing);
+      }
+      xhr.onprogress = sawFirstByte;
       xhr.onload = function () {
+        sawFirstByte();
+        if (timing) timingMark('fish_response_complete', timing);
         var buf = xhr.response;
         var ct = xhr.getResponseHeader('Content-Type') || '';
         var mime = audioMimeFrom(buf, ct);
@@ -466,15 +508,16 @@
           Api._downloadUrl(j.audio_url || j.audioUrl, apiKey).then(resolve, reject);
           return;
         }
-        reject(new Error(apiErrorMessage(j, xhr.status, raw)));
+        reject(new Error(fishErrorMessage(xhr.status, raw, apiKey, 'tts')));
       };
-      xhr.onerror = function () { reject(new Error('网络请求失败（跨域或未走本地代理）')); };
-      xhr.ontimeout = function () { reject(new Error('请求超时')); };
+      xhr.onerror = function () { reject(new Error('Fish Audio network/proxy failure')); };
+      xhr.ontimeout = function () { reject(new Error('Fish Audio network/proxy timeout')); };
+      if (timing) timingMark('fish_request_start', timing);
       xhr.send(JSON.stringify(body));
     });
   }
 
-  function requestForm(url, form, apiKey, timeoutMs) {
+  function requestForm(url, form, apiKey, timeoutMs, errorMessage) {
     return new Promise(function (resolve, reject) {
       var xhr = new XMLHttpRequest();
       xhr.open('POST', url, true);
@@ -484,7 +527,9 @@
         var j = null;
         try { j = JSON.parse(xhr.responseText); } catch (e) {}
         if (xhrJsonOk(xhr, j)) resolve(j);
-        else reject(new Error(apiErrorMessage(j, xhr.status, xhr.responseText)));
+        else reject(new Error(errorMessage
+          ? errorMessage(xhr.status, xhr.responseText, apiKey)
+          : apiErrorMessage(j, xhr.status, xhr.responseText)));
       };
       xhr.onerror = function () { reject(new Error('网络请求失败（跨域或未走本地代理）')); };
       xhr.ontimeout = function () { reject(new Error('请求超时')); };
@@ -548,44 +593,104 @@
     return String(url || '').replace(/^http:\/\//i, 'https://');
   }
 
-  /* Fish Audio Open API (https://docs.fishaudio.org). Credentials are
+  /* Fish Audio API (https://docs.fish.audio). Credentials are
      separate from openai/qwen so switching providers never mixes keys.
-     fishVoice is a speaker id (莱莎默认音色可改)；fishModel is the engine. */
-  var FISH_DEFAULT_BASE = 'https://fishaudio.org/api/open/v1';
+     fishVoice stores Fish's reference_id; fishModel is the `model` header. */
+  var FISH_DEFAULT_BASE = 'https://api.fish.audio';
   var FISH_DEFAULT_VOICE = '';
   var FISH_TTS_MODELS = [
-    'fishaudio-s21pro-flash',
-    'fishaudio-s21pro',
-    'fishaudio-s2pro',
-    'fishaudio-s1',
-    'minimax-2.8-turbo',
-    'minimax-2.8-hd',
-    'minimax-2.6-turbo',
-    'minimax-2.6-hd',
-    'qwen3-tts-flash',
-    'qwen-audio-3.0-tts-plus',
-    'qwen-audio-3.0-tts-flash',
-    'cosyvoice-v3-flash',
-    'doubao-tts-2.0'
+    's2.1-pro-free',
+    's2-pro',
+    's1'
   ];
 
   function fishApiRoot(baseUrl) {
     var s = String(baseUrl || '').trim();
     if (!s) return FISH_DEFAULT_BASE;
     s = s.replace(/\/+$/, '');
-    s = s.replace(/\/speech\/tts\/jobs$/i, '');
-    s = s.replace(/\/speech\/tts$/i, '');
+    s = s.replace(/\/speech\/tts(?:\/jobs)?$/i, '');
     s = s.replace(/\/v1\/tts$/i, '');
-    if (/api\.fish\.audio/i.test(s)) return FISH_DEFAULT_BASE;
-    if (/^https?:\/\/fishaudio\.org$/i.test(s)) return FISH_DEFAULT_BASE;
-    if (/^https?:\/\/fishaudio\.org\/v1$/i.test(s)) return FISH_DEFAULT_BASE;
-    if (/\/api\/open\/v\d+$/i.test(s)) return s;
-    if (/fishaudio\.org$/i.test(s)) return s + '/api/open/v1';
+    s = s.replace(/\/api\/open\/v\d+$/i, '');
+    s = s.replace(/\/model$/i, '');
+    s = s.replace(/\/v1$/i, '');
+    if (/^https?:\/\/(?:api\.)?fish(?:audio)?\.audio(?:\/|$)/i.test(s) ||
+        /^https?:\/\/fishaudio\.org(?:\/|$)/i.test(s)) return FISH_DEFAULT_BASE;
     return s;
   }
 
   function fishTtsUrl(baseUrl) {
-    return fishApiRoot(baseUrl) + '/speech/tts';
+    return fishApiRoot(baseUrl) + '/v1/tts';
+  }
+
+  function timingMark(name, meta) {
+    try {
+      if (window.App && App._ttsTimingMark) App._ttsTimingMark(name, meta || {});
+    } catch (e) {}
+  }
+
+  /* Split completed text into natural speech units. Quoted sentences stay
+     together until their closing quote; unusually long units may fall back
+     to a comma/space boundary so Fish never receives an enormous paragraph. */
+  function speechChunks(text, minChars, maxChars) {
+    text = String(text || '').trim();
+    if (!text) return [];
+    minChars = Math.max(20, Number(minChars) || 80);
+    maxChars = Math.max(minChars, Number(maxChars) || 200);
+    var opens = { '「': '」', '『': '』', '“': '”', '‘': '’', '（': '）', '(': ')' };
+    var closes = { '」': 1, '』': 1, '”': 1, '’': 1, '）': 1, ')': 1, '"': 1 };
+    var stack = [], units = [], start = 0, i, ch, j, probe;
+    for (i = 0; i < text.length; i++) {
+      ch = text.charAt(i);
+      if (ch === '"') {
+        if (stack[stack.length - 1] === '"') stack.pop();
+        else stack.push('"');
+      } else if (opens[ch]) stack.push(opens[ch]);
+      else if (closes[ch] && stack[stack.length - 1] === ch) stack.pop();
+      if (!/[。！？.!?]/.test(ch)) continue;
+      j = i + 1;
+      probe = stack.slice();
+      while (j < text.length && closes[text.charAt(j)] &&
+             probe[probe.length - 1] === text.charAt(j)) {
+        probe.pop(); j++;
+      }
+      if (probe.length) continue;
+      while (j < text.length && /\s/.test(text.charAt(j))) j++;
+      units.push(text.slice(start, j).trim());
+      start = j;
+      i = j - 1;
+      stack = probe;
+    }
+    if (start < text.length) units.push(text.slice(start).trim());
+    units = units.filter(Boolean);
+
+    var bounded = [];
+    units.forEach(function (unit) {
+      while (unit.length > maxChars) {
+        var cut = -1;
+        for (var k = maxChars; k >= minChars; k--) {
+          if (/[、，,;；:：\s]/.test(unit.charAt(k))) { cut = k + 1; break; }
+        }
+        if (cut < 0) cut = maxChars;
+        bounded.push(unit.slice(0, cut).trim());
+        unit = unit.slice(cut).trim();
+      }
+      if (unit) bounded.push(unit);
+    });
+
+    var out = [], current = '', sentenceCount = 0;
+    bounded.forEach(function (unit) {
+      if (!current) { current = unit; sentenceCount = 1; return; }
+      if (sentenceCount < 2 && current.length + unit.length <= maxChars) {
+        current += (/\w$/.test(current) && /^\w/.test(unit)) ? ' ' + unit : unit;
+        sentenceCount++;
+      } else {
+        out.push(current);
+        current = unit;
+        sentenceCount = 1;
+      }
+    });
+    if (current) out.push(current);
+    return out;
   }
 
   function fishLanguage(lg) {
@@ -615,7 +720,7 @@
     return map[e] || '';
   }
 
-  /* Local Ryza samples for Open API clone. Prefer converted wav if present,
+  /* Local Ryza samples for durable Fish model creation. Prefer converted wav,
      otherwise the shipped Japanese prologue m4a (Fish accepts m4a). */
   function fishSampleUrls() {
     var tts = {};
@@ -1000,6 +1105,8 @@
     _fishTtsUrl: fishTtsUrl,
     _fishLanguage: fishLanguage,
     _fishSampleUrls: fishSampleUrls,
+    _fishErrorMessage: fishErrorMessage,
+    speechChunks: speechChunks,
     /* resolved per-mode TTS voice direction (base hint + mode layer) */
     ttsStyleFor: function (mode) { return ttsStyleFor(mode, Config.section('tts')); },
 
@@ -1069,7 +1176,14 @@
       };
       attachThinking(body, llm, _modelMeta && _modelMeta.id === llm.model ? _modelMeta : null);
       return request(localProxy(upstreamUrl(llm.baseUrl, '/chat/completions')),
-                     body, llm.apiKey).then(function (j) {
+                     body, llm.apiKey, null, {
+        requestStart: function () {
+          timingMark('llm_request_start', { generation: opts.speechGeneration });
+        },
+        responseStart: function () {
+          timingMark('llm_response_start', { generation: opts.speechGeneration });
+        }
+      }).then(function (j) {
         return parseTaggedReply(choiceText(j));
       });
     },
@@ -1139,16 +1253,16 @@
     /* ------------------------------------------------------------- TTS */
     /* Resolves to a Blob URL. Returns null when voice is disabled.
        provider: 'openai' (chat/completions + audio, MiMo-style),
-       'qwen' (DashScope-compatible TTS), or 'fish' (Fish Audio Open API
-       POST /speech/tts, binary audio). `mode` is the talk mode. */
-    speak: function (text, lang, mode) {
+       'qwen' (DashScope-compatible TTS), or 'fish' (Fish Audio
+       POST /v1/tts, binary audio). `mode` is the talk mode. */
+    speak: function (text, lang, mode, timing) {
       var tts = Config.section('tts');
       if (tts.mode === 'off') return Promise.resolve(null);
       mode = mode || (Config.section('state') || {}).mode || 'chat';
       /* Per-provider credentials: qwen has its own baseUrl/apiKey so a MiMo
          setup can never leak into a DashScope call (or back). */
       if ((tts.provider || 'openai') === 'qwen') return Api._qwenSpeak(text, lang, mode);
-      if (tts.provider === 'fish') return Api._fishSpeak(text, lang, mode);
+      if (tts.provider === 'fish') return Api._fishSpeak(text, lang, mode, timing);
       if (!tts.apiKey) return Promise.reject(new Error('NO_KEY'));
 
       var audio = { format: tts.format || 'wav' };
@@ -1239,33 +1353,24 @@
       }).then(function (blob) { return URL.createObjectURL(blob); });
     },
 
-    /* ------------------------------------------- Fish Audio Open API TTS */
-    _fishSpeak: function (text, lang, mode) {
+    /* ------------------------------------------------ Fish Audio API TTS */
+    _fishSpeak: function (text, lang, mode, timing) {
       var tts = Config.section('tts');
       if (!tts.fishApiKey) return Promise.reject(new Error('NO_KEY'));
       function synth(voice) {
-        var model = String(tts.fishModel || 'fishaudio-s21pro-flash').trim() ||
-                    'fishaudio-s21pro-flash';
-        var lg = lang || (window.Langs ? Langs.tts() : 'ja');
-        var fmt = (tts.format === 'mp3') ? 'mp3' : 'wav';
+        voice = String(voice || '').trim();
+        if (!voice) return Promise.reject(new Error('Fish Audio: invalid or missing reference_id'));
+        var model = String(tts.fishModel || 's2.1-pro-free').trim() || 's2.1-pro-free';
         var body = {
           text: text,
-          voiceId: voice,
           reference_id: voice,
-          modelId: model,
-          format: fmt
+          format: 'mp3'
         };
-        var fishLang = fishLanguage(lg);
-        if (fishLang) body.language = fishLang;
-        if (fishWantsInstruction(model)) {
-          var style = ttsStyleFor(mode || 'chat', tts);
-          if (style) body.instruction = style;
-        }
-        if (fishWantsEmotion(model)) {
-          var emo = fishEmotion();
-          if (emo) body.emotion = emo;
-        }
-        return requestAudio(localProxy(fishTtsUrl(tts.fishBaseUrl)), body, tts.fishApiKey, 180000);
+        return requestAudio(localProxy(fishTtsUrl(tts.fishBaseUrl)), body,
+                            tts.fishApiKey, 180000, {
+                              model: model,
+                              _timing: timing
+                            });
       }
       var voice = String(tts.fishVoice || '').trim();
       if (voice) return synth(voice);
@@ -1285,14 +1390,14 @@
       var tts = Config.section('tts');
       if (!tts.fishApiKey) return Promise.reject(new Error('NO_KEY'));
       var root = fishApiRoot(tts.fishBaseUrl);
-      return requestGet(localProxy(root + '/voices?pageSize=100&includePersonal=true'),
+      return requestGet(localProxy(root + '/model?page_size=100'),
                         tts.fishApiKey, 20000)
         .then(function (j) {
           var items = (j && j.items) || [];
           var out = [], seen = {};
           items.forEach(function (it) {
             if (!it) return;
-            var id = it.voiceId || it.voice_id || it.id;
+            var id = it._id || it.reference_id || it.voiceId || it.voice_id || it.id;
             if (!id || seen[id]) return;
             seen[id] = 1;
             out.push({ id: id, title: it.title || it.name || id });
@@ -1320,17 +1425,25 @@
           throw new Error('找不到本地莱莎原声（需要 assets/audio/prologue/jp/*.m4a 或 voice/ryza_wav/*.wav）');
         }
         var fd = new FormData();
-        fd.append('name', 'ryza');
+        fd.append('type', 'tts');
+        fd.append('title', 'ryza');
+        fd.append('train_mode', 'fast');
         fd.append('description', 'Local Ryza prologue clone');
         fd.append('visibility', 'private');
-        fd.append('languages', JSON.stringify(['ja', 'zh', 'en']));
-        files.forEach(function (f) { fd.append('audioFiles', f.blob, f.name); });
-        return requestForm(localProxy(fishApiRoot(tts.fishBaseUrl) + '/voices'),
-                           fd, tts.fishApiKey, 180000);
+        files.forEach(function (f) { fd.append('voices', f.blob, f.name); });
+        return requestForm(localProxy(fishApiRoot(tts.fishBaseUrl) + '/model'),
+                           fd, tts.fishApiKey, 180000,
+                           function (status, raw, key) {
+                             return fishErrorMessage(status, raw, key, 'clone');
+                           });
       }).then(function (j) {
-        var vid = j && (j.voiceId || j.voice_id);
-        if (!vid) throw new Error(apiErrorMessage(j, 200, '') || '未返回 voiceId');
+        var vid = j && (j._id || j.reference_id || j.voiceId || j.voice_id);
+        if (!vid) throw new Error('Fish Audio voice clone/reference creation failed: response did not include reference_id');
         return vid;
+      }).catch(function (err) {
+        var msg = redactSecret(err && err.message, tts.fishApiKey);
+        if (/^Fish Audio voice clone\/reference creation failed/.test(msg)) throw new Error(msg);
+        throw new Error('Fish Audio voice clone/reference creation failed: ' + msg);
       });
     },
 

@@ -44,7 +44,7 @@
                           paths). Model id is free-typed; qwen3-tts-* uses
                           multimodal-generation, qwen-audio-* / cosyvoice-*
                           use SpeechSynthesizer.
-       provider 'fish'  : Fish Audio Open API (https://fishaudio.org/api/open/v1).
+       provider 'fish'  : Fish Audio API (https://api.fish.audio/v1/tts).
                           fishVoice empty = clone from local Ryza prologue
                           samples on first speak; fishModel = engine id. */
     tts: {
@@ -74,7 +74,7 @@
       /* fish-specific — endpoint + key + voice are SEPARATE from openai/qwen. */
       fishBaseUrl: '',
       fishApiKey: '',
-      fishModel: 'fishaudio-s21pro-flash',
+      fishModel: 's2.1-pro-free',
       fishVoice: '',
       lang: 'auto'                   // 朗读语言（auto=与 llm.lang 实际值一致）
     },
@@ -183,6 +183,12 @@
      clone from local Ryza prologue samples on first speak. */
   if (data.tts && data.tts.fishVoice === '2bc96959c27d41cc87d517b83569d43a') {
     data.tts.fishVoice = '';
+  }
+  /* The previous shipped default belonged to the retired Fish Open API
+     gateway. Preserve custom choices, but migrate that known default to the
+     model header verified for the current /v1/tts API. */
+  if (data.tts && data.tts.fishModel === 'fishaudio-s21pro-flash') {
+    data.tts.fishModel = 's2.1-pro-free';
   }
   /* One-time migration: `posture_sitting` used to be the shipped default, so
      an old save carries it even though sitting is only selectable on the one

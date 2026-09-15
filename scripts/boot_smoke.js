@@ -275,6 +275,102 @@ for (const f of ['util.js', 'config.js', 'i18n.js', 'api.js', 'memory.js',
     const genAfterStart = sandbox.App._typeGen;
     sandbox.App.typeBubble('abc', null);
     ok(sandbox.App._typeGen === genAfterStart + 1, 'second type chain bumps the gen token');
+
+    /* Fish response speech queue: natural chunks, per-chunk translation,
+       one-at-a-time playback, prefetch, cancellation, and Blob cleanup. */
+    const quoted = A.speechChunks('「今日は楽しかった！ また行こうね？」うん。最後の途中');
+    ok(quoted.length === 2 && quoted[0].indexOf('また行こうね？') >= 0 &&
+       quoted[1].indexOf('最後の途中') >= 0,
+       'speech chunker keeps quoted text together and flushes final partial text');
+
+    C.set('app.voice', true);
+    C.set('state.style', 'voice');
+    C.set('tts.mode', 'clone');
+    C.set('tts.provider', 'fish');
+    C.set('tts.fishVoice', 'saved-reference');
+    C.set('llm.lang', 'id');
+    C.set('tts.lang', 'ja');
+    const queueText =
+      'Kalimat pertama sudah selesai. Kalimat kedua juga sudah selesai. ' +
+      'Kalimat ketiga menyusul sekarang. Kalimat keempat tetap berurutan. ' +
+      'Bagian terakhir tanpa tanda';
+    const wantedChunks = A.speechChunks(queueText, 80, 200);
+    const originalTranslate = A.translate;
+    const originalSpeak = A.speak;
+    const originalPlayUrl = sandbox.App.playUrl;
+    const translated = [], synthesized = [], played = [];
+    let activeAudio = 0, maxActiveAudio = 0;
+    A.translate = function (chunk) {
+      translated.push(chunk);
+      return Promise.resolve('ja:' + chunk);
+    };
+    A.speak = function (chunk) {
+      synthesized.push(chunk);
+      return Promise.resolve('blob:queue-' + synthesized.length);
+    };
+    sandbox.App.playUrl = function (url) {
+      activeAudio++;
+      maxActiveAudio = Math.max(maxActiveAudio, activeAudio);
+      played.push(url);
+      return new Promise((resolve) => setTimeout(function () {
+        activeAudio--;
+        resolve('ended');
+      }, 5));
+    };
+    sandbox.App.typeBubble(queueText);
+    const queueGen = sandbox.App._cancelSpeechQueue();
+    sandbox.App._ttsTimingStart(queueGen);
+    const queueDone = sandbox.App.speakThen(queueText, null, queueGen);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    ok(synthesized.length > 0 && document.getElementById('bubble-text').textContent !== queueText,
+       'first Fish request starts while the UI typewriter is still revealing text');
+    ok(synthesized.length > 1 && activeAudio === 1,
+       'next Fish chunk prepares while the current chunk is playing');
+    await queueDone;
+    ok(translated.length === wantedChunks.length && synthesized.length === wantedChunks.length,
+       'Fish translation and synthesis run once per natural chunk');
+    ok(played.join('|') === wantedChunks.map((x, i) => 'blob:queue-' + (i + 1)).join('|'),
+       'multiple TTS chunks preserve playback order');
+    ok(maxActiveAudio === 1, 'queued TTS chunks never overlap');
+
+    const revoked = [];
+    const originalRevoke = sandbox.URL.revokeObjectURL;
+    sandbox.URL.revokeObjectURL = function (url) { revoked.push(url); };
+    let resolveStale;
+    A.speak = function () {
+      return new Promise((resolve) => { resolveStale = resolve; });
+    };
+    const staleGen = sandbox.App._cancelSpeechQueue();
+    const staleDone = sandbox.App.speakThen('これは古い応答です。', null, staleGen);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    sandbox.App._cancelSpeechQueue();
+    resolveStale('blob:stale');
+    await staleDone;
+    ok(played.indexOf('blob:stale') < 0 && revoked.indexOf('blob:stale') >= 0,
+       'interruption discards stale audio and releases its Blob URL');
+
+    sandbox.App.playUrl = originalPlayUrl;
+    sandbox.App.audio = makeEl('queue-audio');
+    const cleanupDone = sandbox.App.playUrl('blob:cleanup');
+    await Promise.resolve();
+    sandbox.App.audio.onended();
+    await cleanupDone;
+    ok(revoked.indexOf('blob:cleanup') >= 0, 'completed playback releases its Blob URL');
+
+    C.set('tts.provider', 'openai');
+    C.set('llm.lang', 'ja');
+    C.set('tts.lang', 'ja');
+    let nonFishCalls = 0, nonFishText = '';
+    A.speak = function (chunk) { nonFishCalls++; nonFishText = chunk; return Promise.resolve(null); };
+    const nonFishGen = sandbox.App._cancelSpeechQueue();
+    await sandbox.App.speakThen(queueText, null, nonFishGen);
+    ok(nonFishCalls === 1 && nonFishText === queueText,
+       'non-Fish providers keep one unchanged full-text synthesis request');
+
+    A.translate = originalTranslate;
+    A.speak = originalSpeak;
+    sandbox.App.playUrl = originalPlayUrl;
+    sandbox.URL.revokeObjectURL = originalRevoke;
   } catch (e) {
     bad('runtime: ' + (e && e.stack || e));
   }

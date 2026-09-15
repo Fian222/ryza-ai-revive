@@ -252,7 +252,8 @@
 
     prologueNext: function () {
       if (Onboarding._audio) { try { Onboarding._audio.pause(); } catch (e) {} }
-      if (window.App && App._pauseVoice) App._pauseVoice();
+      if (window.App && App._cancelSpeechQueue) App._cancelSpeechQueue();
+      else if (window.App && App._pauseVoice) App._pauseVoice();
       else Avatar.setTalking && Avatar.setTalking(false);
       if (Onboarding._proIdx < 9) {
         Onboarding._proIdx++;
