@@ -2,7 +2,7 @@
 """Local static server + LLM/TTS proxy.
 
 Browser pages on 127.0.0.1 cannot call Aliyun/Xiaomi APIs (CORS).
-POST /_proxy?u=<https url> forwards the JSON body and Authorization header.
+POST /_proxy?u=<https url> forwards the request body and provider headers.
 
   python scripts/serve.py
   # http://127.0.0.1:8765/
@@ -94,7 +94,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, api-key")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, api-key, model")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
 
@@ -119,6 +119,9 @@ class Handler(SimpleHTTPRequestHandler):
         apikey = self.headers.get("api-key") or self.headers.get("Api-Key")
         if apikey:
             headers["api-key"] = apikey
+        model = self.headers.get("model")
+        if model:
+            headers["model"] = model
         req = Request(target, data=body, headers=headers, method="POST")
         try:
             with urlopen(req, timeout=180) as resp:
