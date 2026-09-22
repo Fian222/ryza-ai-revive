@@ -24,6 +24,14 @@
 (function (global) {
   'use strict';
 
+  /* localStorage key for the three save slots.
+     This line is the whole fix for "why can't I save and load data": when the
+     forms moved out of app.js, the *uses* came along and the *declaration*
+     stayed behind, so both slot helpers threw ReferenceError inside a
+     `catch (e) {}` — the list always rendered empty and every write vanished
+     while the toast still said "Saved". app.js no longer declares it. */
+  var SAVE_KEY = 'ryza.saves.v1';
+
   var Settings = {
     buildSettings: function () {
       var w = document.getElementById('settings-form');
@@ -601,13 +609,18 @@
       var row = document.createElement('div');
       row.className = 'btn-row';
       var b = document.createElement('button');
-      b.className = 'btn primary'; b.textContent = '保存并回到对话';
-      b.onclick = function () { App.toast(I18n.t('toast.saved')); App.showView('talk'); };
+      b.className = 'btn primary'; b.textContent = T('chara.saveBack');
+      b.onclick = function () {
+        Config.save();          // the label promises a save, so do one
+        App.toast(I18n.t('toast.saved')); App.showView('talk');
+      };
       row.appendChild(b);
       var b2 = document.createElement('button');
-      b2.className = 'btn danger'; b2.textContent = '清空对话记忆';
+      b2.className = 'btn danger'; b2.textContent = T('chara.clearMemory');
       b2.onclick = function () {
-        if (confirm('清空当前对话历史？')) { App.history = []; App.toast('已清空'); }
+        if (confirm(T('chara.clearMemory.confirm'))) {
+          App.history = []; App.toast(I18n.t('chara.clearMemory.done'));
+        }
       };
       row.appendChild(b2);
       w.appendChild(row);
@@ -622,8 +635,18 @@
       return slots.slice(0, 3);
     },
 
+    /* false = nothing was written, and the caller already has been told. */
     _writeSlots: function (slots) {
-      try { localStorage.setItem(SAVE_KEY, JSON.stringify(slots)); } catch (e) {}
+      try {
+        localStorage.setItem(SAVE_KEY, JSON.stringify(slots));
+        return true;
+      } catch (e) {
+        /* The usual cause is quota: a slot carries the whole chat history, and
+           three of them share one origin's budget. Reporting success here
+           would be the second half of that same bug. */
+        App.toast(I18n.t('slot.saveFail'), true);
+        return false;
+      }
     },
 
     _snapshot: function () {
@@ -644,7 +667,10 @@
     },
 
     _applySnapshot: function (snap) {
-      if (!snap || !snap.settings) return;
+      if (!snap || !snap.settings) {
+        App.toast(I18n.t('slot.loadFail'), true);
+        return false;
+      }
       Config.importJSON(JSON.stringify(snap.settings));
       App.history = snap.history || [];
       App.memory = snap.memory || [];
@@ -674,6 +700,7 @@
       App.renderSkins();
       I18n.setLang(Config.section('app').lang);
       App.applyI18n(document);
+      return true;
     },
 
     _renderSlots: function (wrap) {
@@ -699,7 +726,7 @@
         save.onclick = function () {
           var all = Settings._loadSlots();
           all[i] = Settings._snapshot();
-          Settings._writeSlots(all);
+          if (!Settings._writeSlots(all)) return;
           Settings.buildCharaForm();
           App.toast(I18n.t('toast.saved'));
         };
@@ -711,7 +738,7 @@
         load.onclick = function () {
           var all = Settings._loadSlots();
           if (!all[i]) return;
-          Settings._applySnapshot(all[i]);
+          if (!Settings._applySnapshot(all[i])) return;
           App.toast(I18n.t('slot.load'));
           App.showView('talk');
         };
