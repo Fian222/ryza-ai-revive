@@ -38,7 +38,9 @@ First-run help (keys, base URLs, save slots, costumes): [docs/SETUP.md](docs/SET
 - Dialogue modes: chat, story, immersive, ASMR, text
 - Spine 4.2 portrait and scene graph (posture, camera, tap hit-testing)
 - Local RPG-style state: stamina, quests, inventory, daily rewards (`localStorage`)
-- Two-layer session memory, independent of adventure logs
+- Two-layer session memory plus a dated long-term layer, independent of adventure logs
+- Sitting variants (normal / cross-legged) when the worn outfit ships both
+- Storage-pressure canary: a full origin is reported instead of failing silently
 - Four language slots (UI, bundled voice, LLM output, TTS), seven UI locales
 - Tagged replies for scene side effects; numeric deltas in a trailing `<state>` block (no function-calling requirement)
 
@@ -81,15 +83,12 @@ Android toolchain path: environment `RYZA_ANDROID_TOOLS`, or gitignored `config/
 
 ## Tests
 
+The full list (18 node suites, the boundary guard and the packaging gate) lives in
+[docs/PROJECT.md §4](docs/PROJECT.md). One-liner for the whole thing:
+
 ```powershell
-node scripts/boot_smoke.js
-node scripts/game_logic_regression.js
-node scripts/memory_regression.js
-node scripts/motion_regression.js
-node scripts/save_slot_regression.js
-node scripts/transport_error_regression.js
-node scripts/expression_coverage.js
-python scripts/privacy_check.py web
+python scripts/privacy_check.py web && node scripts/layering_check.js --strict
+node scripts/boot_smoke.js && node scripts/motion_regression.js
 ```
 
 Contribution rules: [CONTRIBUTING.md](CONTRIBUTING.md).

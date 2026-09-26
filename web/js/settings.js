@@ -250,8 +250,9 @@
           { hint: T('settings.localEngineHint') });
         App._field(w, T('settings.localStyle'), Config.section('tts')[lrow.creds.voice.split('.').pop()],
           function (v) { Config.set(lrow.creds.voice, v); });
-        App._field(w, T('settings.speakHint'), Config.section('tts').styleHint,
-          function (v) { Config.set('tts.styleHint', v); }, { multi: true });
+        App._field(w, T('settings.styleHint'), Config.section('tts').styleHint,
+          function (v) { Config.set('tts.styleHint', v); },
+          { multi: true, hint: T('settings.styleHint.hint') });
       } else {
       App._field(w, T('settings.baseUrl'), Config.section('tts').baseUrl,
         function (v) { Config.set('tts.baseUrl', v); });

@@ -145,7 +145,6 @@
       volume: 0.9,
       textSpeed: 30,                 // ms per character (×1; see TEXT_SPEEDS)
       vibration: true,
-      fullscreen: false,
       rim: true,
       nsfwEnabled: false,            // explicit user permission; AI cannot enable it when off
       showBubble: true,              // talk bubbles over the stage (auto-fade)

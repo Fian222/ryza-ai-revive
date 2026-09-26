@@ -990,8 +990,33 @@
       App.refreshHud();
     },
 
+    /* ---------------------------------------------------- storage pressure */
+    /* Every store in this app writes under its own key and each of them used to
+       swallow QuotaExceededError (settings / game / daily / alarms / memory),
+       so a full origin looked like "things quietly stopped being saved" and
+       only showed up as an older state after a restart (issue #14). We cannot
+       rewrite every writer from here, but we can tell the player the truth:
+       one canary write, checked at most once a minute, one toast per session. */
+    _storageProbe: 'ryza.probe',
+    _storageFull: false,
+    _storageCheckedAt: 0,
+    _checkStorage: function (force) {
+      var now = Date.now();
+      if (!force && now - (App._storageCheckedAt || 0) < 60000) return App._storageFull;
+      App._storageCheckedAt = now;
+      var full = false;
+      try {
+        localStorage.setItem(App._storageProbe, '1');
+        localStorage.removeItem(App._storageProbe);
+      } catch (e) { full = true; }
+      if (full && !App._storageFull) App.toast(I18n.t('toast.storageFull'), true);
+      App._storageFull = full;
+      return full;
+    },
+
     /* RPG strip: apples (StaminaAppleRow) + coin + level. */
     refreshHud: function () {
+      App._checkStorage();
       var chip = document.getElementById('hud-stamina');
       if (chip) {
         var a = Game.apples();
@@ -1650,10 +1675,8 @@
       var exit = document.exitFullscreen || document.webkitExitFullscreen;
       if (!cur) {
         req && req.call(el);
-        Config.set('app.fullscreen', true);
       } else {
         exit && exit.call(document);
-        Config.set('app.fullscreen', false);
       }
     },
 

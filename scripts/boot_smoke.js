@@ -446,6 +446,23 @@ for (const f of ['util.js', 'config.js', 'i18n.js', 'api.js', 'providers.js', 't
     ok(sandbox.App._failKind('model not found') === 'model',
        'a rejected model name still classifies');
     ok(sandbox.App._failKind('') === 'other', 'anything else falls through to other');
+    /* ---- storage pressure canary (issue #14) ----
+       Every store writes under its own key and each of them used to swallow
+       QuotaExceededError, so a full origin meant "saving silently stopped". */
+    ok(sandbox.App._checkStorage(true) === false, 'a writable store is not reported as full');
+    {
+      const realSet = localStorage.setItem;
+      localStorage.setItem = (k, v) => {
+        if (k === sandbox.App._storageProbe) throw new Error('QuotaExceededError');
+        return realSet(k, v);
+      };
+      sandbox.App._storageFull = false;
+      ok(sandbox.App._checkStorage(true) === true,
+         'a refused canary write is reported as storage-full (not swallowed)');
+      ok(sandbox.App._checkStorage(true) === true, 'and it stays reported on the next check');
+      localStorage.setItem = realSet;
+      ok(sandbox.App._checkStorage(true) === false, 'freeing space clears the flag');
+    }
   } catch (e) {
     bad('runtime: ' + (e && e.stack || e));
   }
