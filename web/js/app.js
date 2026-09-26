@@ -87,6 +87,12 @@
       (root || document).querySelectorAll('[data-i18n]').forEach(function (el) {
         el.textContent = I18n.t(el.getAttribute('data-i18n'));
       });
+      /* data-i18n-title sets the tooltip (title attr) rather than the text —
+         used where a button already shows an icon or short label but wants a
+         longer hover hint. */
+      (root || document).querySelectorAll('[data-i18n-title]').forEach(function (el) {
+        el.setAttribute('title', I18n.t(el.getAttribute('data-i18n-title')));
+      });
     },
 
     _syncPanelFrac: function () {
@@ -133,6 +139,11 @@
       Daily.load();
       Quests.ensure();
       try { if (window.Memory) Memory.load(); } catch (e) {}
+      /* A corrupt or recovered memory blob used to be invisible: it silently
+         became "no memories" and the next write buried the old payload.
+         Remember the outcome and say it once the toast host is up (#14). */
+      try { App._memNotice = window.Memory ? Memory.lastLoad() : 'empty'; }
+      catch (e) { App._memNotice = 'empty'; }
 
       App._bindChrome();
       App._bindTalk();
@@ -158,6 +169,8 @@
         });
         App.updateHud();
         App.renderWorld();
+        if (App._memNotice === 'recovered') App.toast(I18n.t('memory.recovered'));
+        else if (App._memNotice === 'corrupt') App.toast(I18n.t('memory.corrupt'), true);
         /* The Android shell can schedule alarms in the system: they survive the
            process being killed and can wake the lock screen, which an in-page
            timer cannot. When that bridge is present the native side becomes the
@@ -518,6 +531,12 @@
            see Avatar.postureSwitchable. */
         if (window.Avatar && Avatar.shouldResetPosture && Avatar.shouldResetPosture()) {
           Config.set('state.posture', 'posture_standing');
+          /* The sitting VARIANT (cross-legged) is part of the same per-stage
+             choice: back to the outfit's own default, so a stage change cannot
+             leave her cross-legged on a sofa authored for the normal sit.
+             setSittingVariant owns the persisted value (single writer). */
+          if (Avatar.setSittingVariant) Avatar.setSittingVariant('sitting_normal');
+          else Config.set('state.sittingVariant', '');
         }
         App.updateHud();   /* posture chip visibility follows the worn outfit */
       });
@@ -663,6 +682,17 @@
         App.setPosture(Avatar.postureKey() === 'posture_standing'
           ? 'posture_sitting' : 'posture_standing');
       };
+      /* Seated variant (cross-legged / normal). Same action-semantics rule as
+         the sit/stand chip: the label names what the tap will do. Only shown
+         while the sitting skeleton is on screen AND the outfit's SittingSets
+         really ships a second variant — see Avatar.sittingSwitchable. */
+      var sitVarBtn = document.getElementById('btn-sit-variant');
+      if (sitVarBtn) sitVarBtn.onclick = function () {
+        var next = Avatar.currentSittingVariant() === 'sitting_agura'
+          ? 'sitting_normal' : 'sitting_agura';
+        Avatar.setSittingVariant(next);
+        App.updateHud();
+      };
       var skinBtn = document.getElementById('btn-chara-skin');
       if (skinBtn) skinBtn.onclick = function () { App.showView('skin'); };
       /* place / tod / mode / map now live inside the mode sheet (the » row
@@ -773,13 +803,25 @@
       /* 服装导入：ZIP 走 CrfStore（IndexedDB），失败只报错不崩 */
       var crfBtn = document.getElementById('btn-crf-zip');
       var crfFile = document.getElementById('crf-file-zip');
+      /* Map a CrfStore error to a translated line: prefer crf.err.<code>, and
+         fall back to the error's own English message when a code is missing
+         or has no translation yet. */
+      function crfErrText(e) {
+        var code = e && e.code;
+        if (code) {
+          var key = 'crf.err.' + code;
+          var s = I18n.t(key);
+          if (s && s !== key) return s;
+        }
+        return (e && e.message) || String(e);
+      }
       if (crfBtn && crfFile) {
         crfBtn.onclick = function () { crfFile.click(); };
         crfFile.onchange = function () {
           var f = crfFile.files && crfFile.files[0];
           crfFile.value = '';
           if (!f) return;
-          App.toast('导入中…');
+          App.toast(I18n.t('crf.importing'));
           CrfStore.importZip(f).then(function (v) {
             return CrfStore.get(v.id).then(function (rec) {
               var base = Avatar.skinsIndex || [];
@@ -787,10 +829,10 @@
               Avatar.skinsIndex = base;
               Config.set('state.skin', v.id);
               App.renderSkins();
-              App.toast('已导入：' + v.id);
+              App.toast(I18n.t('crf.imported') + v.id);
             });
           }).catch(function (e) {
-            App.toast('导入失败：' + e.message, true);
+            App.toast(crfErrText(e), true);
           });
         };
       }
@@ -798,15 +840,15 @@
       if (crfRm) {
         crfRm.onclick = function () {
           var list = CrfStore.list();
-          if (!list.length) { App.toast('没有导入的服装'); return; }
+          if (!list.length) { App.toast(I18n.t('crf.none')); return; }
           var last = list[list.length - 1];
           CrfStore.remove(last.id).then(function () {
             Avatar.skinsIndex = (Avatar.skinsIndex || []).filter(function (x) {
               return x.id !== last.id;
             });
             App.renderSkins();
-            App.toast('已移除：' + last.id);
-          }).catch(function (e) { App.toast('移除失败：' + e.message, true); });
+            App.toast(I18n.t('crf.removed') + last.id);
+          }).catch(function (e) { App.toast(crfErrText(e), true); });
         };
       }
       var peopleBtn = document.getElementById('btn-world-people');
@@ -919,6 +961,19 @@
         postureBtn.textContent = both
           ? (Avatar.postureKey() === 'posture_standing'
               ? I18n.t('posture.sit') : I18n.t('posture.stand'))
+          : '';
+      }
+      var sitVarBtn = document.getElementById('btn-sit-variant');
+      if (sitVarBtn) {
+        var canSitVar = window.Avatar && Avatar.sittingSwitchable && Avatar.sittingSwitchable();
+        sitVarBtn.classList.toggle('hidden', !canSitVar);
+        sitVarBtn.textContent = canSitVar
+          ? (Avatar.currentSittingVariant() === 'sitting_agura'
+              ? I18n.t('posture.sitNormal') : I18n.t('posture.agura'))
+          : '';
+        sitVarBtn.title = canSitVar
+          ? (Avatar.currentSittingVariant() === 'sitting_agura'
+              ? I18n.t('posture.sitNormalTip') : I18n.t('posture.aguraTip'))
           : '';
       }
       var todBtn = document.getElementById('btn-tod-label');
@@ -2290,13 +2345,29 @@
     },
 
     /* ------------------------------------------------------------ memory */
+    MEMORY_MAX: 400,          /* raw diary cap; the cards above are the long term */
     remember: function (who, text) {
       App.memory.push({ who: who, text: text, at: Date.now() });
-      if (App.memory.length > 400) App.memory = App.memory.slice(-400);
+      if (App.memory.length > App.MEMORY_MAX) {
+        App.memory = App.memory.slice(-App.MEMORY_MAX);
+      }
       App.saveMemory();
     },
+    /* true = written. On quota the in-memory log is kept and the player is
+       told once — before this, the write failed silently and the log simply
+       reverted to an older copy on the next launch (issue #14). */
     saveMemory: function () {
-      try { localStorage.setItem(MEM_KEY, JSON.stringify(App.memory)); } catch (e) {}
+      try {
+        localStorage.setItem(MEM_KEY, JSON.stringify(App.memory));
+        App._memSaveWarned = false;
+        return true;
+      } catch (e) {
+        if (!App._memSaveWarned) {
+          App._memSaveWarned = true;
+          App.toast(I18n.t('memory.saveFail'), true);
+        }
+        return false;
+      }
     },
     renderMemory: function () {
       var root = document.getElementById('memory-list');
@@ -2343,9 +2414,17 @@
       if (App.memory && App.memory.length) {
         var h2 = document.createElement('div');
         h2.className = 'mem-layer';
-        h2.textContent = T('memory.log');
+        h2.textContent = T('memory.log') + ' (' + App.memory.length + ')';
         root.appendChild(h2);
-        App.memory.slice().reverse().slice(0, 40).forEach(function (m) {
+        if (App.memory.length >= App.MEMORY_MAX) {
+          var cap = document.createElement('div');
+          cap.className = 'hint';
+          cap.textContent = I18n.tf('memory.logCap', '只保留最近 {n} 条对白', { n: App.MEMORY_MAX });
+          root.appendChild(cap);
+        }
+        /* Show every stored line, not the last 40: the rest were in storage
+           all along, and hiding them read as "the memory deletes itself". */
+        App.memory.slice().reverse().forEach(function (m) {
           var el = document.createElement('div');
           el.className = 'card';
           el.innerHTML = '<div class="card-title"><span class="tag' +

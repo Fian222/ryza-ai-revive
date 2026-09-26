@@ -119,7 +119,13 @@
       dislikes: 'じっとしていること',
       situation: 'クーケン島の自分の家で、君と一緒に過ごしている',
       callMe: '君',
-      extra: ''
+      extra: '',
+      /* Optional replacement for the built-in Ryza character block. Empty =
+         ship the default. When set, it swaps ONLY the character description;
+         the reply protocol (tag line + <state>), the output-language rules and
+         the per-turn scene block still come from api.js, so a custom persona
+         can't break the avatar or the RPG state. */
+      systemPromptOverride: ''
     },
 
     /* ---- player profile (onboarding answers) ---- */
@@ -166,6 +172,12 @@
          shipped pack that is 隠れ家前 / stage_01_002_01 alone; every other
          scene dictates its own posture (Avatar.postureKey reads the scene). */
       posture: 'posture_standing',
+      /* Seated variant inside the sitting skeleton: 'sitting_normal' (the
+         outfit's own default) or 'sitting_agura' (cross-legged). Only honoured
+         while a sitting skin is loaded and the worn outfit's gesture table
+         actually ships that id — see Avatar.sittingVariants. Empty = the
+         outfit default. A stage change clears it (App._loadSceneFor). */
+      sittingVariant: '',
       day: 1,
       lastDayDate: '',
       /* flow-mode in-game clock: gameHour (0-24) + the real ms it was last
