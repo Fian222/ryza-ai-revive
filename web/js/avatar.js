@@ -2262,7 +2262,7 @@
          repeatMin/repeatMax: the same head/eye pattern plays N times before
          a new driver is rolled. Keep the pattern within a band; when the
          band changes (talk start/stop) start a new pattern cleanly. */
-      var spec = null, i, hit = null;
+      var spec = null, hit = null;
       var cyc = Avatar._lookCyc;
       if (cyc && cyc.band === band && cyc.left > 0 && cyc.spec) {
         cyc.left--;

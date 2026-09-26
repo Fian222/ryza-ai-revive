@@ -112,7 +112,6 @@
   var _present = null;     /* fn(res)            — outcome of an offline action */
   var _generate = null;    /* fn(msgs, opts) -> Promise<{text}>  — LLM quest text */
   var _notice = null;      /* fn(msg, isErr)     — progress/result toast */
-  var _navigate = null;    /* fn(viewId)         — "take me to that screen" */
 
   function celebrate() {
     if (!_celebrate) return;
@@ -466,7 +465,6 @@
     setPresenter: function (fn) { _present = (typeof fn === 'function') ? fn : null; },
     setGenerator: function (fn) { _generate = (typeof fn === 'function') ? fn : null; },
     setNotice: function (fn) { _notice = (typeof fn === 'function') ? fn : null; },
-    setNavigator: function (fn) { _navigate = (typeof fn === 'function') ? fn : null; },
 
     render: function (root, hooks) {
       if (!root) return;

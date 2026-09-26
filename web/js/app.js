@@ -274,7 +274,6 @@
          world / alarm never reference App, Sound or Fx themselves. */
       if (World.setNotice) World.setNotice(App.toast);
       if (Quests.setNotice) Quests.setNotice(App.toast);
-      if (Quests.setNavigator) Quests.setNavigator(function (view) { App.showView(view); });
       if (Alarm.setEditor) Alarm.setEditor(function (id) { App._editAlarm(id); });
       var celebrate = function () {
         if (window.Sound) Sound.se('quest_clear');

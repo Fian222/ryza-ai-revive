@@ -21,6 +21,7 @@ scripts/
   serve.py              # static origin + CORS proxy
   build_indexes.py      # assets → web/assets/_index/*.json
   restore_media.py      # copy runtime binaries into web/assets/
+  verify_skins.py       # official outfit record check (sizes / zip sha256)
   stamp_version.js      # version.json → package.json, Gradle
   privacy_check.py      # packaging gate
   layering_check.js     # cross-module boundary guard (--strict must be 0)

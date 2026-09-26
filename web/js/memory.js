@@ -208,7 +208,6 @@
   }
 
   function flushPending() {
-    var c = cfg();
     if (!state.pending.length) return Promise.resolve(false);
     var batch = state.pending.slice();
     state.pending = [];
