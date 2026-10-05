@@ -1448,6 +1448,14 @@
     },
 
     /* ------------------------------------------------------- status sheet */
+    /* The status sheet's rest button: { ok, why } where why is 'full' | 'day'. */
+    _canRest: function () {
+      if (Game.cheat() || Game.s.stamina >= Game.max()) return { ok: false, why: 'full' };
+      var tod = Config.section('state').tod;
+      if (tod !== 'eve' && tod !== 'ngt') return { ok: false, why: 'day' };
+      return { ok: true, why: '' };
+    },
+
     renderStatus: function () {
       var root = document.getElementById('status-body');
       if (!root) return;
@@ -1475,6 +1483,26 @@
       }
       sect(I18n.t('st.level') + ' ' + Game.level());
       row(I18n.t('stamina') || 'スタミナ', appleHtml + ' <b>' + (Game.cheat() ? '∞' : Game.s.stamina + '/' + Game.max()) + '</b>');
+      /* Issue #18: sleeping restored stamina only when the model remembered to
+         emit `stage: sleep`. A deterministic way home — gated so it does not
+         turn stamina into a free resource: evening/night only, and not when
+         already full. Same path as the faint screen's button (_sleepHome). */
+      var rest = App._canRest();
+      var rr = row('', '');
+      var rv = rr.querySelector('.st-v');
+      var rb = document.createElement('button');
+      rb.type = 'button';
+      rb.className = 'mini-btn';
+      rb.textContent = I18n.t('stamina.sleep');
+      rb.disabled = !rest.ok;
+      rb.onclick = function () { if (App._canRest().ok) App._sleepHome(); };
+      rv.appendChild(rb);
+      if (!rest.ok) {
+        var rh = document.createElement('span');
+        rh.className = 'st-hint';
+        rh.textContent = ' ' + I18n.t(rest.why === 'full' ? 'st.restFull' : 'st.restNight');
+        rv.appendChild(rh);
+      }
       row(I18n.t('st.exp'), e.into + ' / ' + e.span + '（' + Game.s.exp_total + '）');
       row('G', Game.cheat() ? '∞' : String(Game.s.money));
       var q = Quests.active();

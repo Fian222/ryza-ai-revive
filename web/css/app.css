@@ -183,6 +183,8 @@ body.boot #topbar > #winctl{display:flex;pointer-events:auto;
 .mini-btn{font-size:12px;padding:6px 11px;border-radius:9px;border:1px solid var(--line);
   background:rgba(232,180,92,.1);transition:.15s}
 .mini-btn:active{transform:scale(.96)}
+.mini-btn:disabled{opacity:.45;cursor:default;transform:none}
+.st-hint{font-size:11px;color:var(--dim)}
 .mini-btn:hover{background:rgba(232,180,92,.2)}
 select{background:rgba(20,14,18,.9);border:1px solid var(--line);border-radius:9px;padding:6px 9px;font-size:13px;
   max-width:46vw;overflow:hidden;text-overflow:ellipsis}

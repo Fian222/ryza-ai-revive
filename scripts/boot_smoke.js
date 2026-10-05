@@ -238,6 +238,28 @@ for (const f of ['util.js', 'config.js', 'i18n.js', 'api.js', 'providers.js', 't
     sandbox.App.buildCharaForm();
     sandbox.App.updateHud();
     ok(true, 'render surfaces + settings form built');
+
+    /* status-sheet rest button gate (issue #18): evening/night and not full */
+    {
+      const A = sandbox.App, C = sandbox.Config;
+      const tod0 = C.section('state').tod, st0 = g.s.stamina;
+      g.s.stamina = g.max();
+      C.set('state.tod', 'ngt');
+      ok(A._canRest().ok === false && A._canRest().why === 'full', 'rest: full stamina → disabled');
+      g.s.stamina = 1;
+      C.set('state.tod', 'aft');
+      ok(A._canRest().ok === false && A._canRest().why === 'day', 'rest: afternoon → disabled');
+      C.set('state.tod', 'eve');
+      ok(A._canRest().ok === true, 'rest: evening + tired → allowed');
+      C.set('app.cheat', true);
+      ok(A._canRest().ok === false, 'rest: cheat mode (infinite stamina) → disabled');
+      C.set('app.cheat', false);
+      A.renderStatus();
+      A._sleepHome();
+      ok(g.s.stamina === g.max(), 'rest: _sleepHome refills stamina');
+      g.s.stamina = st0;
+      C.set('state.tod', tod0);
+    }
     ok(!!sandbox.Memory && sandbox.Memory.promptBlock() === '', 'Memory module boots empty');
     sandbox.App.renderMemory();
     ok(!sandbox.App._lastText, 'no stale retry text');
