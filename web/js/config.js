@@ -274,6 +274,25 @@
     },
     get: function () { return data; },
     section: function (name) { return data[name]; },
+    /* Whether the chat endpoint is usable at all. A key is required, except
+       for a loopback base URL: a local server (Ollama, LM Studio, llama.cpp)
+       usually has no key, and asking the player to type a fake one was the
+       whole of issue #17's friction. Same loopback rule as /_proxy. */
+    llmReady: function () {
+      var llm = data.llm || {};
+      if (llm.apiKey) return true;
+      return Config.isLoopbackUrl(llm.baseUrl);
+    },
+    isLoopbackUrl: function (url) {
+      var m = /^https?:\/\/(\[[^\]]*\]|[^\/:?#]+)/i.exec(String(url || '').trim());
+      if (!m) return false;
+      var h = m[1].replace(/^\[|\]$/g, '').toLowerCase();
+      if (h === 'localhost' || h === '::1') return true;
+      var q = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+      if (!q || q[1] !== '127') return false;
+      for (var i = 2; i <= 4; i++) if (Number(q[i]) > 255) return false;
+      return true;
+    },
     set: function (path, value) {
       var parts = path.split('.'), node = data, i;
       for (i = 0; i < parts.length - 1; i++) {

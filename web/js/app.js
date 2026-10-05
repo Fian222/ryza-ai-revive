@@ -760,7 +760,7 @@
         World.jumpArea(e.target.value, Config.section('state').stage, App.gotoStage);
       };
       document.getElementById('btn-quest-new').onclick = function () {
-        var hasKey = !!(Config.section('llm').apiKey);
+        var hasKey = Config.llmReady();
         if (hasKey) App.toast(I18n.t('toast.questGen'));
         Quests.generate(hasKey).then(function (q) {
           App.toast(I18n.t('quest.newOk') + '「' + q.title + '」');
@@ -1715,7 +1715,7 @@
 
     say: function (text) {
       var st = Config.section('state');
-      if (!Config.section('llm').apiKey) {
+      if (!Config.llmReady()) {
         App.toast(I18n.t('toast.needKey'), true);
         App.showView('settings');
         return;
@@ -2513,8 +2513,8 @@
 
     _fetchModels: function () {
       var llm = Config.section('llm');
-      if (!llm.apiKey) { App.toast(I18n.t('toast.needKey'), true); return; }
       if (!llm.baseUrl) { App.toast(I18n.t('toast.needUrl'), true); return; }
+      if (!Config.llmReady()) { App.toast(I18n.t('toast.needKey'), true); return; }
       App.toast(I18n.t('toast.modelsWait'));
       Api.listModels().then(function (list) {
         App._llmModels = list || [];

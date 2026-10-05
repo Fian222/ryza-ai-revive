@@ -530,7 +530,7 @@
 
     _testLlm: function () {
       var llm = Config.section('llm');
-      if (!llm.apiKey) { App.toast(I18n.t('toast.needKey'), true); return; }
+      if (!Config.llmReady()) { App.toast(I18n.t('toast.needKey'), true); return; }
       App.toast('测试中…');
       /* stand-alone: testing the endpoint must not supersede (and so silently
          discard) a reply the player is waiting for. */

@@ -219,6 +219,7 @@
       L.push('荷物・金・経験・クエスト・記憶が動いたときだけ末尾に <state>：');
       L.push('<state>{"stamina_delta":-2,"exp_delta":10,"money_delta":50,"inventory_added":[{"id":"emeralia","count":1}],"quest":{"step_add":1}}</state>');
       L.push('key: stamina_delta exp_delta money_delta inventory_added|removed ryza_inventory_* memory_add quest{step_add,complete}');
+      L.push('素材を手に入れたら inventory_added に入れる（採取クエストは個数で自動に進む）。寝るときは <state> ではなく stage: sleep。');
     }
     return L.join('\n');
   }
@@ -266,11 +267,23 @@
     if (!m) m = /<state>\s*([\s\S]*)$/i.exec(body);   // forgotten closing tag
     if (m) {
       body = (body.slice(0, m.index) + body.slice(m.index + m[0].length)).trim();
-      try {
-        state = JSON.parse(m[1]
-          .replace(/[{,]\s*\/\/[^\n]*/g, '')
-          .replace(/,\s*([}\]])/g, '$1'));
-      } catch (e) { state = null; }
+      var raw = m[1]
+        .replace(/^```(?:json)?\s*|\s*```$/g, '')
+        .replace(/[{,]\s*\/\/[^\n]*/g, '')
+        .replace(/,\s*([}\]])/g, '$1');
+      try { state = JSON.parse(raw); } catch (e) {
+        /* Weaker models write JS-ish objects: bare keys, single quotes.
+           Retry once with those normalised before giving the block up —
+           and say so, instead of dropping it silently (issue #18). */
+        try {
+          state = JSON.parse(raw
+            .replace(/([{,]\s*)([A-Za-z_]\w*)\s*:/g, '$1"$2":')
+            .replace(/'([^'\\]*)'/g, '"$1"'));
+        } catch (e2) {
+          state = null;
+          if (typeof console !== 'undefined') console.warn('[state] unparsable block dropped:', m[1].slice(0, 200));
+        }
+      }
       if (state && typeof state !== 'object') state = null;
     }
     return { text: body, state: state };
@@ -1296,7 +1309,7 @@
 
     chat: function (history, userText, opts) {
       var llm = Config.section('llm');
-      if (!llm.apiKey) return Promise.reject(new Error('NO_KEY'));
+      if (!Config.llmReady()) return Promise.reject(new Error('NO_KEY'));
       opts = opts || {};
       /* A side call (dynamically generated quest text, the settings "test LLM"
          button) must not allocate an epoch. Allocating one aborted whatever the
@@ -1363,7 +1376,7 @@
     complete: function (system, user, opts) {
       opts = opts || {};
       var llm = Config.section('llm');
-      if (!llm.apiKey) return Promise.reject(new Error('NO_KEY'));
+      if (!Config.llmReady()) return Promise.reject(new Error('NO_KEY'));
       return request(localProxy(upstreamUrl(llm.baseUrl, '/chat/completions')), {
         model: llm.model,
         messages: [
@@ -1379,7 +1392,7 @@
 
     listModels: function () {
       var llm = Config.section('llm');
-      if (!llm.apiKey) return Promise.reject(new Error('NO_KEY'));
+      if (!Config.llmReady()) return Promise.reject(new Error('NO_KEY'));
       if (!llm.baseUrl) return Promise.reject(new Error('NO_URL'));
       return requestGet(localProxy(upstreamUrl(llm.baseUrl, '/models')), llm.apiKey, 20000)
         .then(function (j) {
