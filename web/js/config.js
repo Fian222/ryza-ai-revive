@@ -204,11 +204,38 @@
     return out;
   }
 
-  var data;
+  /* First launch only (nothing saved yet): pick the UI language from the
+     device instead of always starting in Chinese — a player who cannot read
+     the first screen cannot find the language switch on it either. A saved
+     choice always wins; a device language we do not ship falls to English. */
+  function deviceLang() {
+    var nav = (typeof navigator !== 'undefined' && navigator) || {};
+    var list = (nav.languages && nav.languages.length) ? nav.languages : [nav.language];
+    for (var i = 0; i < list.length; i++) {
+      var l = String(list[i] || '').toLowerCase();
+      if (!l) continue;
+      if (/^zh-(tw|hk|mo)|^zh-hant/.test(l)) return 'zh-tw';
+      if (/^zh/.test(l)) return 'zh';
+      if (/^ja/.test(l)) return 'ja';
+      if (/^(id|in)(-|$)/.test(l)) return 'id';
+      if (/^hi/.test(l)) return 'hi';
+      if (/^pt/.test(l)) return 'pt-br';
+      if (/^en/.test(l)) return 'en';
+    }
+    return list[0] ? 'en' : '';
+  }
+
+  var data, firstRun = false;
   try {
-    data = deepMerge(DEFAULTS, JSON.parse(localStorage.getItem(KEY) || '{}'));
+    var saved = localStorage.getItem(KEY);
+    firstRun = !saved;
+    data = deepMerge(DEFAULTS, JSON.parse(saved || '{}'));
   } catch (e) {
     data = deepMerge(DEFAULTS, {});
+  }
+  if (firstRun) {
+    var dl = deviceLang();
+    if (dl) data.app.lang = dl;
   }
   if (data.state && data.state.skin) {
     data.state.skin = String(data.state.skin).replace(/_(01|99)$/, '');

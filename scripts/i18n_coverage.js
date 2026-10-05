@@ -103,7 +103,8 @@ console.log('\n# 2b. 动态硬查找的整个域都要有词');
        mode/mode.sub ← api.js MODES（对话模式胶囊）
        dl.week     ← daily.js DAYS
        onb.gender  ← onboarding 问卷的三个选项
-       tod         ← util.js TOD_START（mor/aft/eve/ngt） */
+       tod         ← util.js TOD_START（mor/aft/eve/ngt）
+       bubble.fail ← app.js _failKind 的六种归类（走 I18n.tc，缺词会退成日文台词） */
   const domains = {
     'alarm.type.': ['goodMorning', 'playWithMe', 'task', 'wellDone'],
     'alarm.style.': ['normal', 'whisper'],
@@ -111,7 +112,8 @@ console.log('\n# 2b. 动态硬查找的整个域都要有词');
     'mode.sub.': ['chat', 'story', 'immersive', 'asmr', 'text'],
     'dl.week.': ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
     'onb.gender.': ['female', 'male', 'other'],
-    'tod.': ['mor', 'aft', 'eve', 'ngt']
+    'tod.': ['mor', 'aft', 'eve', 'ngt'],
+    'bubble.fail.': ['nokey', 'auth', 'model', 'timeout', 'net', 'other']
   };
   const dynKeys = [];
   for (const [prefix, vals] of Object.entries(domains)) vals.forEach((v) => dynKeys.push(prefix + v));

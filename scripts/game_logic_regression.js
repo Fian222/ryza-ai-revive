@@ -202,6 +202,33 @@ Config.set('llm.apiKey', 'sk-test');
 ok(Config.llmReady() === true, 'any host with a key is ready');
 Config.set('llm.apiKey', '');
 
+console.log('# first launch follows the device language (PR #16 idea, redone)');
+function bootLang(navLangs, savedCfg) {
+  const st = {};
+  if (savedCfg) st['ryza.settings.v1'] = JSON.stringify(savedCfg);
+  const ls = { getItem: (k) => (k in st ? st[k] : null), setItem: (k, v) => { st[k] = String(v); },
+               removeItem: (k) => { delete st[k]; } };
+  const box = { console, Math, JSON, Date, Object, Array, String, Number, RegExp, isFinite, parseInt,
+                setTimeout, clearTimeout, localStorage: ls,
+                navigator: navLangs ? { languages: navLangs, language: navLangs[0] } : {},
+                location: { origin: 'http://127.0.0.1:8765' }, document: { getElementById: () => null } };
+  box.window = box;
+  vm.createContext(box);
+  ['util.js', 'config.js'].forEach((f) =>
+    vm.runInContext(fs.readFileSync(path.join(WEB, f), 'utf8'), box, { filename: f }));
+  return box.Config.section('app').lang;
+}
+ok(bootLang(['en-US']) === 'en', 'en-US device → en');
+ok(bootLang(['zh-TW']) === 'zh-tw' && bootLang(['zh-Hant-HK']) === 'zh-tw', 'traditional Chinese → zh-tw');
+ok(bootLang(['zh-CN']) === 'zh' && bootLang(['ja-JP']) === 'ja', 'zh-CN → zh, ja-JP → ja');
+ok(bootLang(['in-ID']) === 'id' && bootLang(['pt-PT']) === 'pt-br', 'legacy in-ID → id, pt → pt-br');
+ok(bootLang(['fr-FR', 'ja']) === 'ja', 'first supported entry in the list wins');
+ok(bootLang(['fr-FR']) === 'en', 'unsupported device language → en');
+ok(bootLang(null) === 'zh', 'no navigator language → shipped default');
+ok(bootLang(['en-US'], { app: { lang: 'ja' } }) === 'ja', 'a saved choice always wins over the device');
+ok(bootLang(['en-US'], { llm: { model: 'x' } }) === 'zh',
+   'existing install without app.lang keeps the old default (no surprise switch)');
+
 console.log('# battle economics (area used to be a string: NaN wiped gold)');
 Game.reset();
 Game.s.quest = null;
