@@ -23,12 +23,10 @@
     var pin = mk('win-pin', '📌', '窗口置顶');
     var min = mk('win-min', '—', '最小化');
     var cls = mk('win-close', '✕', '关闭');
-    var settingsBtn = document.getElementById('btn-settings');
-    if (settingsBtn && settingsBtn.parentNode === bar) {
-      bar.insertBefore(ctl, settingsBtn.nextSibling);
-    } else {
-      bar.appendChild(ctl);
-    }
+    /* 窗口控件挂在顶栏末尾。这里曾经想在「设置」按钮后面插入，
+       但官方 UI 改版后设置入口搬进了侧边菜单（`#sm-settings`），
+       `#btn-settings` 已经不存在 —— 那半个分支永远走不到，删掉。 */
+    bar.appendChild(ctl);
 
     pin.onclick = function () {
       global.ryzaShell.setTopmost(!pin.classList.contains('on')).then(function (on) {
